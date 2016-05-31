@@ -9,17 +9,20 @@
 #include "opencv2/imgcodecs.hpp"
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include "imagemanager.h"
 
 using namespace cv;
+
+ImageManager imageManager;
+
 
 
 UCallbackAction onImage(const UMessage &msg) {
     if (msg.binaryType != BINARYMESSAGE_IMAGE)
         return URBI_CONTINUE;
 
-    msg.client.printf("something received");
 
-    msg.client.printf("Image of size (%d,%d) received from server at %d\n",msg.image.width, msg.image.height, msg.timestamp);
+ //   msg.client.printf("Image of size (%d,%d) received from server at %d\n",msg.image.width, msg.image.height, msg.timestamp);
 
     unsigned char *image = new unsigned char[msg.image.width * msg.image.height * 3];
     int sz = msg.image.width*msg.image.height * 3;
@@ -32,9 +35,15 @@ UCallbackAction onImage(const UMessage &msg) {
 
     Mat imageMat(Size(msg.image.width, msg.image.height), CV_8UC3, image, Mat::AUTO_STEP);
 
-    cvtColor(imageMat, imageMat, CV_RGB2GRAY);
+ //   cvtColor(imageMat, imageMat, CV_RGB2GRAY);
 
     cv::imshow("Display Image", imageMat);
+
+    if(imageManager.findVictim(imageMat))
+    {
+        std::cout << "FOUND VICTIM\n" << std::flush;
+        msg.client.printf("FOUND VICTIM\n");
+    }
 
     if (waitKey(30) == 27)
     {
@@ -62,6 +71,8 @@ int main() {
     client->syncGetDevice("distanceNear", distanceNear);
 
     std::cout << "beginning distanceNear: " << distanceNear << "\n" << std::flush;
+
+
 
 
     // Con questo script il robot cammina in avanti e muove la testa prendendo immagini finchè non incontra un ostacolo; appena lo incontra, ferma la testa e si
@@ -132,13 +143,13 @@ int main() {
 
     client->setCallback(onImage, "onImage");
 
-    while(true)
-    {
-        double distanceNear;
-        client->syncGetDevice("distanceNear", distanceNear);
+//    while(true)
+//    {
+//        double distanceNear;
+//        client->syncGetDevice("distanceNear", distanceNear);
 
-        std::cout << "distanceNear: " << distanceNear << "\n" << std::flush;
-    }
+//        std::cout << "distanceNear: " << distanceNear << "\n" << std::flush;
+//    }
 
 
     urbi::execute();

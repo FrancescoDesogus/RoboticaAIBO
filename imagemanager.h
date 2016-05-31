@@ -8,7 +8,14 @@ class ImageManager
 {
 public:
     ImageManager();
-    bool findVictim(cv::Mat image);
+    bool findVictim(cv::Mat img_scene);
+
+private:
+    static const int MATCH_METHOD;
+    static const int LOW_THRESHOLD;
+
+    cv::Mat templateImage;
+    cv::Mat resultImage;
 };
 
 #endif // IMAGEMANAGER_H
