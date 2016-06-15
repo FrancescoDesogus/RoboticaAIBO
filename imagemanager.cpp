@@ -10,7 +10,7 @@
 using namespace cv;
 using namespace std;
 
-const int ImageManager::MATCH_METHOD = TM_CCOEFF;
+const int ImageManager::MATCH_METHOD = TM_CCOEFF_NORMED;
 const int ImageManager::LOW_THRESHOLD = 35;
 
 
@@ -18,9 +18,9 @@ ImageManager::ImageManager()
 {
     templateImage = imread("/home/francesco/QtCreatorProjects/Robotica/human_figure.bmp", IMREAD_GRAYSCALE);
 
-    cv::Canny(templateImage, templateImage, LOW_THRESHOLD, 3*LOW_THRESHOLD, 3);
+//    cv::Canny(templateImage, templateImage, LOW_THRESHOLD, 3*LOW_THRESHOLD, 3);
 
-    resize(templateImage, templateImage, Size(), 0.15, 0.15, cv::INTER_LANCZOS4);
+    resize(templateImage, templateImage, Size(), 0.1, 0.1, cv::INTER_LANCZOS4);
 
 }
 
@@ -30,7 +30,7 @@ bool ImageManager::findVictim(cv::Mat cameraImage)
 
     cvtColor(cameraImage, cameraImage, CV_BGR2GRAY);
 //        cv::blur( cameraImage, cameraImage, Size(3,3) );
-    cv::Canny(cameraImage, cameraImage, LOW_THRESHOLD, 3*LOW_THRESHOLD, 3);
+//    cv::Canny(cameraImage, cameraImage, LOW_THRESHOLD, 3*LOW_THRESHOLD, 3);
 
     Mat img_display;
     cameraImage.copyTo( img_display );
@@ -38,6 +38,7 @@ bool ImageManager::findVictim(cv::Mat cameraImage)
 
     /// Do the Matching and Normalize
     matchTemplate( cameraImage, templateImage, resultImage, MATCH_METHOD );
+    threshold(resultImage, resultImage, 0.1, 1, CV_THRESH_TOZERO);
 
     /// Localizing the best match with minMaxLoc
     double minVal;
@@ -58,10 +59,11 @@ bool ImageManager::findVictim(cv::Mat cameraImage)
         matchLoc = maxLoc;
     }
 
-    rectangle( img_display, matchLoc, Point( matchLoc.x + templateImage.cols , matchLoc.y + templateImage.rows ), Scalar(255,0,0), 2, 8, 0 );
+//    rectangle( img_display, matchLoc, Point( matchLoc.x + templateImage.cols , matchLoc.y + templateImage.rows ), Scalar(255,0,0), 2, 8, 0 );
 
     /// Show me what you got
-    if(maxVal > 4.10000e+006 && maxVal < 2.30000e+007){
+//    if(maxVal > 4.10000e+006 && maxVal < 2.30000e+007){
+    if(maxVal > 0.65) {
         rectangle( img_display, matchLoc, Point( matchLoc.x + templateImage.cols , matchLoc.y + templateImage.rows ), Scalar(255,0,0), 2, 8, 0 );
 //            rectangle( resultImage, matchLoc, Point( matchLoc.x + templateImage.cols , matchLoc.y + templateImage.rows ), Scalar(255,0,0), 2, 8, 0 );
         result = true;
@@ -69,10 +71,10 @@ bool ImageManager::findVictim(cv::Mat cameraImage)
     imshow("Resulting image", img_display );
 
 
-    imshow("cameraImage", templateImage);
+//    imshow("cameraImage", templateImage);
 
-    if(waitKey(27) >= 0)
-        return false;
+//    if(waitKey(27) >= 0)
+//        return false;
 
     // the camera will be deinitialized automatically in VideoCapture destructor
     return result;
