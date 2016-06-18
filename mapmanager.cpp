@@ -87,7 +87,6 @@ void MapManager::setupRobotManagerThread()
 
 void MapManager::terminateRobot()
 {
-    std::cout << "aa\n" << std::flush;
     robotManagerThread->terminate();
     delete robotManagerThread;
 }

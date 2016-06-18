@@ -3,6 +3,7 @@
 
 #include "opencv2/imgproc.hpp"
 #include "opencv2/imgcodecs.hpp"
+#include <vector>
 
 class ImageManager
 {
@@ -14,7 +15,7 @@ private:
     static const int MATCH_METHOD;
     static const int LOW_THRESHOLD;
 
-    cv::Mat templateImage;
+    std::vector<cv::Mat> templateImageArray;
     cv::Mat resultImage;
 };
 

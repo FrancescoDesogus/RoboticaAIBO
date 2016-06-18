@@ -11,6 +11,10 @@ int main(int argc, char *argv[])
 
     mapManager.init();
 
+//    RobotManager robotManager;
+
+//    robotManager.init();
+
     return 0;
 }
 
