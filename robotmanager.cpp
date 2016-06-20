@@ -85,14 +85,14 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
          defaultHeadPan = 0;
          defaultHeadTilt = 14;
 
-         distanceMax = 20;
+         distanceMax = 15;
 
          rotation = 0;
          isTurningClockwise = 0;
 
          adjustRoute = 0;
 
-         timeNeededToWalk = 1400ms;
+         timeNeededToWalk = 1800ms;
 
          // Funzione di convenienza che stampa i valori dell'headPan e della distanza in modo che vengano chiamati i rispettivi callback C++.
          // La dichiaro prima di tutto il resto perchè viene usata quasi subito e deve essere visibile nello scope
@@ -125,6 +125,10 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              ledF13 = 0;
              ledF14 = 0;
              ledHW = 0;
+             ledHC = 0;
+             modeB = 1;
+             modeG = 1;
+             modeR = 0;
          };
 
          // Booleani per indicare l'attività che si sta eseguendo, in modo che si possano inviare a C++ i valori giusti in base alla situazione. In un dato
@@ -139,8 +143,8 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
          orientation = 0;
 
           // All'avvio passo a C++ i valori dello stato e dell'orientamento, per inizializzare la GUI
-         robotState: state;
-         robotOrientation: orientation;
+//         robotState: state;
+//         robotOrientation: orientation;
 
          robot.stand();
 
@@ -173,6 +177,37 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
 
          turnOffLeds();
 
+         function averageDistanceNear(counter) {
+             avg = 0;
+             accumulator = 0;
+
+             for(n = 0; n < counter; n++)
+             {
+                 accumulator = accumulator + distanceNear.val;
+                 wait(1ms);
+             };
+
+             avg = (accumulator/counter);
+
+             return avg;
+         };
+
+         function averageDistanceFar(counter) {
+             avg = 0;
+             accumulator = 0;
+
+             for(n = 0; n < counter; n++)
+             {
+                 accumulator = accumulator + distanceFar.val;
+                 wait(1ms);
+             };
+
+             avg = (accumulator/counter);
+
+             return avg;
+         };
+
+
 
          whenever (walkingBool == 1) {
              printHeadAngleAndDistance();
@@ -184,23 +219,34 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
 //             printHeadAngleAndDistance() & sendingImages();
              sendingImages();
 
+
+
              // Guarda a sinistra
-             if((headPan > 50 && headPan < 90) && distanceNear < 12)
+             if(headPan > 80)
              {
-                 if(distanceNear < adgjustmentMinDistance)
+                 avgDist = averageDistanceNear(15);
+
+                 if(avgDist < 11 && avgDist < adgjustmentMinDistance)
                  {
-                     adgjustmentMinDistance = distanceNear.val;
+                     ppp = 333;
+                     prova: ppp;
+                     adgjustmentMinDistance = avgDist;
                      adjustRoute = 1;
                      turnClockwise = 1;
                  };
              };
 
 
-             if((headPan < -50 && headPan > -90) && distanceNear < 12)
+             if(headPan < -80)
              {
-                 if(distanceNear < adgjustmentMinDistance)
+                 avgDist = averageDistanceNear(15);
+
+                 if(avgDist < 11 && avgDist < adgjustmentMinDistance)
                  {
-                     adgjustmentMinDistance = distanceNear.val;
+
+                     aaa = 222;
+                     prova: aaa;
+                     adgjustmentMinDistance = avgDist;
                      adjustRoute = 1;
                      turnClockwise = 0;
                  };
@@ -215,7 +261,7 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
 
              // Per ottenere il tempo di attesa per ogni incremento ho fatto la proporzione 2390 : 90 = 26 : x -> x = (26 * 90)/2390 ~ 1 secondo.
              // Ho fatto la proporzione in modo tale che la rotazione aumenti di 1 prima di ogni attesa
-             wait(26ms);
+             wait(58ms);
          };
 
 
@@ -239,8 +285,8 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
 
                  // Passo lo stato e l'orientamento (che non è stato modificato in questo contesto) a C++ (in modo che scatti il callback), così che
                  // la GUI possa aggiornare la mappa correttamente
-                 robotState: state;
-                 robotOrientation: orientation;
+//                 robotState: state;
+//                 robotOrientation: orientation;
              };
 
              headPan = defaultHeadPan | headTilt = defaultHeadTilt | neck = defaultNeck | wait(100ms);
@@ -292,8 +338,8 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
 
                  // Passo lo stato e l'orientamento (che non è stato modificato in questo contesto) a C++ (in modo che scatti il callback), così che
                  // la GUI possa aggiornare la mappa correttamente con il nuovo orientamento
-                 robotState: state;
-                 robotOrientation: orientation;
+//                 robotState: state;
+//                 robotOrientation: orientation;
 
                  // Passo i valori di testa e distanza a C++ per mettere nella GUI il pallino del muro più lontano
                  for(counter = 0; counter < 12; counter++)
@@ -317,8 +363,8 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              state = 1;
 
              // Mando l'informazione sullo stato e l'orientamento (che non cambia in fase di ricerca) a C++
-             robotState: state;
-             robotOrientation: orientation;
+//             robotState: state;
+//             robotOrientation: orientation;
 
 
              turnOffLeds();
@@ -331,6 +377,16 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
                     speaker.play("turret_search_4.wav")
                  else
                     speaker.play("turret_active_8.wav");
+             };
+
+             if(currentTurningSearchCounter == previousTurningSearchCounter)
+             {
+                 currentTurningSearchCounter = 0;
+                 previousTurningSearchCounter = 0;
+             }
+             else
+             {
+                 previousTurningSearchCounter = currentTurningSearchCounter;
              };
 
 
@@ -351,18 +407,21 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              adgjustmentMinDistance = 150;
 
 
-             pan = 90;
+             startingPan = 90;
              step = 180/8;
 
              for(k = 0; k <= 8; k++)
              {
-                 headPan = pan - k*step smooth: 200ms | headTilt = 0 smooth: 200ms | wait(200ms);
+                 headPan = startingPan - k*step smooth: 150ms | headTilt = -5 smooth: 150ms | wait(100ms);
 
-                 if(distanceNear > 8 && distanceNear <= 30)
+                 avgDistanceNear = averageDistanceNear(2);
+
+                 if(avgDistanceNear > 8 && avgDistanceNear <= 40)
                  {
-                    headTilt = 30 time: 1000ms
+                    headTilt = 30 time: 1000ms;
                  };
              };
+
 
 
              // Terminata la ricerca, riporto la testa dritta in modo da poter controllare con il sensore sulla testa se va a sbattere
@@ -372,13 +431,14 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              {
                 adjustRoute = 0;
 
-//                robot.swalk(-1);
-
                 startingTime = time();
 
                 at(time() - startingTime > 2300ms) {
                    stop adjustment;
                 };
+
+                state = adgjustmentMinDistance;
+                robotState: state;
 
                 if(turnClockwise == 1)
                     adjustment: robot.sturn(1)
@@ -432,15 +492,21 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              maxValue = 0;
 
              whenever(checkingDistance == 1) {
-                if(distanceFar < 150 )
+                avgDistanceFar = averageDistanceFar(2);
+//                 avgDistanceFar = distanceFar.val;
+
+                if(avgDistanceFar < 150 )
                 {
-                    if(distanceFar > maxValue)
+                    if(avgDistanceFar > maxValue)
                     {
-                        maxValue = distanceFar.val;
+                        maxValue = avgDistanceFar;
                     };
+
+                    pro = avgDistanceFar;
+                    prova: avgDistanceFar;
                 };
 
-                wait(100ms);
+                wait(50ms);
              };
 
              // Giro la testa a destra e aspetto un piccolo tot di tempo in modo che il robot abbia il tempo di girarla prima di eseguire il resto
@@ -449,10 +515,8 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              checkingDistance = 0;
 
              // Controllo se c'è spazio per andare a destra, e nel caso segnalo che bisogna girare in senso orario
-             if(maxValue >= 40)
+             if(maxValue >= 50)
              {
-                 a = maxValue;
-                 prova: maxValue;
                  clockwise = 1;
              };
 
@@ -497,13 +561,17 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
                  {
 //                    robot.turn(-turnTime)
                      robot.sturn(-turnSteps);
+                     turningBool = 0;
                      robot.swalk(1);
+                     turningBool = 1;
                  }
                  else
                  {
 //                    robot.turn(turnTime);
                      robot.sturn(turnSteps);
+                     turningBool = 0;
                      robot.swalk(1);
+                     turningBool = 1;
                  };
              };
 
@@ -528,7 +596,7 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
          // in quanto mentre gira alternerà il vedere ostacoli a non vederne), il robot cammina in avanti, iniziando una fase di ricerca ogni tot
          walkingBehaviour: at (distanceNear >= distanceMax ~ timeNeededToWalk) {
 
-            timeNeededToWalk = 1400ms;
+            timeNeededToWalk = 1800ms;
 
             if(walkingBool == 0)
             {
@@ -546,6 +614,10 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
                 stop walk;
                 stop search;
 
+                if(turningFromSearchBool == 1) {
+                    turningFromSearchBool = 0;
+//                    robot.swalk(1);
+                };
 
                 // Pattern della camminata: si cammina un tot di secondi e poi si esegue la ricerca per un altro tot di secondi; questo all'infinito (o meglio fino
                 // a quando non trova un ostacolo e si attiva il corrispondente behaviour)
@@ -554,21 +626,8 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
                     search: searching();
                 };
             }
-            else
-            {
-                prov = 7777;
-                prova: prov;
-            };
 
-         }
-        onleave {
-            prov = 888;
-            prova: prov;
-            prov = 888;
-            prova: prov;
-            prov = 888;
-            prova: prov;
-        };
+         };
 
         /* Behaviour per girare. Se c'è un ostacolo il robot deve reagire subito e girare, ma bisogna capire da che parte girare.
          * Ci sono vari casi possibili infatti:
@@ -581,16 +640,16 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
          *
          * Tutti questi casi si possono risolvere in questo modo: il robot gira la testa a destra, e se vede che c'è abbastanza spazio da quella parte si gira
          * in senso orario (dopo aver riportato la testa dritta). Altrimenti se non c'è spazio a destra, gira a sinistra */
-        turningBehaviour: at (distanceNear < 20 ~ 300ms) {
+        turningBehaviour: at (distanceNear < 15 ~ 300ms) {
             // Eseguo la girata vera e propria
             turn: turning();
         };
 
 
 
-//        at (backSensorM > 0) {
-//            stop search;
-//        };
+        at (backSensorM > 0) {
+            stop search;
+        };
 
         victimFound = 0;
         playedRecently = 0;
@@ -598,13 +657,21 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
         at (victimFound == 1) {
             if(playedRecently == 0)
             {
-                speaker.play("bark.wav");
+                speaker.play("iseeyou.wav");
                 playedRecently = 1;
                 victimFound = 0;
                 start = time();
-                at (time() - start > 800ms) {
+                modeB = 0;
+                modeG = 0;
+                modeR = 1;
+                earR = 1 smooth: 200ms | earL = 1 smooth: 200ms;
+                at (time() - start > 1200ms) {
                     playedRecently = 0;
                     victimFound = 0;
+                    modeB = 1;
+                    modeG = 1;
+                    modeR = 0;
+                    earR = 0 smooth: 200ms | earL = 0 smooth: 200ms;
                 };
             };
         };
@@ -630,58 +697,60 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
 //        };
 
 
+        turningFromSearchBool = 0;
+
+        currentTurningSearchCounter = 0;
+        previousTurningSearchCounter = 0;
+
+
         // Durante la fase di ricerca, il robot gira la testa da sinistra a 70. Quando guarda a destra (cioè l'angolo della testa è maggiore di un dato valore)
         // se i sensori notano che non c'è una parete (cioè distanceFar è >= 20) allora vuol dire che c'è una strada alla destra del robot. Se questo è vero
         // per un tot di tempo, prendiamo l'informazione per buona e facciamo girare il robot di 90 gradi in senso orario
-        at ((distanceFar >= 45 && headPan < -75 && searchingBool == 1) ~ 300ms) {
+        at ((distanceFar >= 45 && headPan < -75 && searchingBool == 1) ~ 200ms) {
 
-            walkingBool = 0;
-            turningBool = 0;
-            searchingBool = 0;
+            currentTurningSearchCounter++;
+            ledHC = 1;
 
-//            prov = 100;
-//            prova: prov;
+            prova: currentTurningSearchCounter;
 
+            if(currentTurningSearchCounter == 2)
+            {
+                currentTurningSearchCounter = 0;
+                previousTurningSearchCounter = 0;
 
+                ledHC = 1;
+                ledHW = 1;
 
-            stop pattern;
-            stop walk;
-            stop search;
+                walkingBool = 0;
+                turningBool = 0;
+                searchingBool = 0;
 
-//            unfreeze walkingBehaviour;
+                stop pattern;
+                stop walk;
+                stop search;
 
-
-//            headTilt = -30;
-//            neck = -50;
-//            wait(300);
-
-
-
-//            wait(5000ms);
-
+                freeze turningBehaviour;
 
 
-//            freeze walkingBehaviour;
-            freeze turningBehaviour;
+                turningFromSearchBool = 1;
 
 
+                robot.swalk(1);
+                unfreeze walkingBehaviour;
 
 
-//            freeze walkingBehaviour;
-            robot.swalk(1);
-            unfreeze walkingBehaviour;
+                distanceMax = 151;
+                timeNeededToWalk = 1ms;
+                wait(100ms);
+                freeze walkingBehaviour;
+
+                timeNeededToWalk = 3600ms;
 
 
-            distanceMax = 151;
-            timeNeededToWalk = 1ms;
-            wait(100ms);
-            freeze walkingBehaviour;
+                // Giriamo di 90 gradi negativi per far girare il robot in senzo orario
+                turn: turning();
+            };
 
-            timeNeededToWalk = 3500ms;
-
-
-            // Giriamo di 90 gradi negativi per far girare il robot in senzo orario
-            turn: turning();
         };
     ));
 

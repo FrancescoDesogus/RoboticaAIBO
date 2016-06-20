@@ -24,7 +24,7 @@ ImageManager::ImageManager()
 
 
     for(int i = 0; i < templateImageArray.size(); i++)
-        resize(templateImageArray[i], templateImageArray[i], Size(), 0.12, 0.12, cv::INTER_LANCZOS4);
+        resize(templateImageArray[i], templateImageArray[i], Size(), 0.10, 0.10, cv::INTER_LANCZOS4);
 
 
     imshow("cameraImage", templateImageArray[0]);
@@ -81,7 +81,7 @@ bool ImageManager::findVictim(cv::Mat cameraImage)
     //    rectangle( img_display, matchLoc, Point( matchLoc.x + templateImage.cols , matchLoc.y + templateImage.rows ), Scalar(255,0,0), 2, 8, 0 );
 
         /// Show me what you got
-        if(maxVal > 0.625) {
+        if(maxVal > 0.63) {
             rectangle( cameraImage, matchLoc, Point( matchLoc.x + templateImageArray[i].cols , matchLoc.y + templateImageArray[i].rows ), Scalar(255,0,0), 2, 8, 0 );
     //            rectangle( resultImage, matchLoc, Point( matchLoc.x + templateImage.cols , matchLoc.y + templateImage.rows ), Scalar(255,0,0), 2, 8, 0 );
             result = true;
