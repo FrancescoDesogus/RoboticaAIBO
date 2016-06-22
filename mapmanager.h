@@ -2,7 +2,11 @@
 #define MAPMANAGER_H
 
 #include <QQuickView>
+#include <opencv2/imgcodecs.hpp>
 #include "robotmanager.h"
+#include <QLabel>
+#include <QScrollArea>
+#include <QVBoxLayout>
 
 class MapManager : public QObject
 {
@@ -13,21 +17,30 @@ public:
 
     static const int WIDTH;
     static const int HEIGHT;
-    static const int WINDOW_ROTATION;
 
 private:
     RobotManager robotManager;
     QThread* robotManagerThread;
 
+    // Label per le immagini della camera
+    QLabel cameraLabel;
+
+    // Layout su cui inserire le immagini delle vittime trovate
+    QVBoxLayout *layout;
+
+    QImage Mat2QImage(const cv::Mat3b &src);
     void setupRobotManagerThread();
 
 public slots:
     void init();
-    void terminateRobot();
+    void printImage(cv::Mat cvImage);
+    void printVictimImage(cv::Mat cvImage);
 
 signals:
     void pointFound(QVariant distance, QVariant angle);
-    void robotStateChanged(QVariant newState, QVariant newAngle);
+    void victimFound(QVariant distance);
+    void robotTurn(QVariant angle);
+    void generateStep();
 };
 
 #endif // MAPMANAGER_H

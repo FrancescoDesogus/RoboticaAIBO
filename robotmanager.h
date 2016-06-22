@@ -14,33 +14,36 @@ class RobotManager : public QObject
 public:
     RobotManager(QObject *parent = 0);
 
+
 public slots:
     void init();
 
 private:
+    // Valore threshold per la media calcolata sui sensori della distanza per generare meglio la mappa
+    static const int AVERAGE_THRESHOLD;
+
     UCallbackAction onImageCallback(const UMessage &msg);
     UCallbackAction onHeadPanCallback( const UMessage &msg);
     UCallbackAction onDistanceSensorCallback( const UMessage &msg);
-    UCallbackAction onRobotStateChanged( const UMessage &msg);
-    UCallbackAction onOrientationChanged( const UMessage &msg);
-    UCallbackAction  onProva(const UMessage &msg);
+    UCallbackAction onGenerateStepCallback( const UMessage &msg);
+    UCallbackAction onRobotTurnCallback( const UMessage &msg);
+    UCallbackAction onVictimFoundCallback( const UMessage &msg);
+    UCallbackAction onPrinterCallback(const UMessage &msg);
 
 
     ImageManager imageManager;
-    double headPanValue;
-    double distanceValue;
     std::vector<double> distanceVec;
     std::vector<double> headPanVec;
-    double averageCounter;
-    int robotState;
-    int robotOrientation;
-    int average;
-
-    int imageFoundCounter;
+    int averageCounter;
+    int victimFoundCounter;
 
 signals:
     void pointFound(QVariant distance, QVariant angle);
-    void robotStateChanged(QVariant newState, QVariant newAngle);
+    void newCameraImage(cv::Mat cvImage);
+    void victimImageFound(cv::Mat cvImage);
+    void victimFound(QVariant distance);
+    void robotTurn(QVariant angle);
+    void generateStep();
 };
 
 

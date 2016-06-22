@@ -19,8 +19,8 @@
 
 QT_BEGIN_MOC_NAMESPACE
 struct qt_meta_stringdata_RobotManager_t {
-    QByteArrayData data[9];
-    char stringdata[82];
+    QByteArrayData data[13];
+    char stringdata[129];
 };
 #define QT_MOC_LITERAL(idx, ofs, len) \
     Q_STATIC_BYTE_ARRAY_DATA_HEADER_INITIALIZER_WITH_OFFSET(len, \
@@ -34,14 +34,19 @@ QT_MOC_LITERAL(1, 13, 10),
 QT_MOC_LITERAL(2, 24, 0),
 QT_MOC_LITERAL(3, 25, 8),
 QT_MOC_LITERAL(4, 34, 5),
-QT_MOC_LITERAL(5, 40, 17),
-QT_MOC_LITERAL(6, 58, 8),
-QT_MOC_LITERAL(7, 67, 8),
-QT_MOC_LITERAL(8, 76, 4)
+QT_MOC_LITERAL(5, 40, 14),
+QT_MOC_LITERAL(6, 55, 7),
+QT_MOC_LITERAL(7, 63, 7),
+QT_MOC_LITERAL(8, 71, 16),
+QT_MOC_LITERAL(9, 88, 11),
+QT_MOC_LITERAL(10, 100, 9),
+QT_MOC_LITERAL(11, 110, 12),
+QT_MOC_LITERAL(12, 123, 4)
     },
     "RobotManager\0pointFound\0\0distance\0"
-    "angle\0robotStateChanged\0newState\0"
-    "newAngle\0init\0"
+    "angle\0newCameraImage\0cv::Mat\0cvImage\0"
+    "victimImageFound\0victimFound\0robotTurn\0"
+    "generateStep\0init\0"
 };
 #undef QT_MOC_LITERAL
 
@@ -51,23 +56,31 @@ static const uint qt_meta_data_RobotManager[] = {
        7,       // revision
        0,       // classname
        0,    0, // classinfo
-       3,   14, // methods
+       7,   14, // methods
        0,    0, // properties
        0,    0, // enums/sets
        0,    0, // constructors
        0,       // flags
-       2,       // signalCount
+       6,       // signalCount
 
  // signals: name, argc, parameters, tag, flags
-       1,    2,   29,    2, 0x06,
-       5,    2,   34,    2, 0x06,
+       1,    2,   49,    2, 0x06,
+       5,    1,   54,    2, 0x06,
+       8,    1,   57,    2, 0x06,
+       9,    1,   60,    2, 0x06,
+      10,    1,   63,    2, 0x06,
+      11,    0,   66,    2, 0x06,
 
  // slots: name, argc, parameters, tag, flags
-       8,    0,   39,    2, 0x0a,
+      12,    0,   67,    2, 0x0a,
 
  // signals: parameters
     QMetaType::Void, QMetaType::QVariant, QMetaType::QVariant,    3,    4,
-    QMetaType::Void, QMetaType::QVariant, QMetaType::QVariant,    6,    7,
+    QMetaType::Void, 0x80000000 | 6,    7,
+    QMetaType::Void, 0x80000000 | 6,    7,
+    QMetaType::Void, QMetaType::QVariant,    3,
+    QMetaType::Void, QMetaType::QVariant,    4,
+    QMetaType::Void,
 
  // slots: parameters
     QMetaType::Void,
@@ -81,8 +94,12 @@ void RobotManager::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id
         RobotManager *_t = static_cast<RobotManager *>(_o);
         switch (_id) {
         case 0: _t->pointFound((*reinterpret_cast< QVariant(*)>(_a[1])),(*reinterpret_cast< QVariant(*)>(_a[2]))); break;
-        case 1: _t->robotStateChanged((*reinterpret_cast< QVariant(*)>(_a[1])),(*reinterpret_cast< QVariant(*)>(_a[2]))); break;
-        case 2: _t->init(); break;
+        case 1: _t->newCameraImage((*reinterpret_cast< cv::Mat(*)>(_a[1]))); break;
+        case 2: _t->victimImageFound((*reinterpret_cast< cv::Mat(*)>(_a[1]))); break;
+        case 3: _t->victimFound((*reinterpret_cast< QVariant(*)>(_a[1]))); break;
+        case 4: _t->robotTurn((*reinterpret_cast< QVariant(*)>(_a[1]))); break;
+        case 5: _t->generateStep(); break;
+        case 6: _t->init(); break;
         default: ;
         }
     } else if (_c == QMetaObject::IndexOfMethod) {
@@ -95,9 +112,33 @@ void RobotManager::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id
             }
         }
         {
-            typedef void (RobotManager::*_t)(QVariant , QVariant );
-            if (*reinterpret_cast<_t *>(func) == static_cast<_t>(&RobotManager::robotStateChanged)) {
+            typedef void (RobotManager::*_t)(cv::Mat );
+            if (*reinterpret_cast<_t *>(func) == static_cast<_t>(&RobotManager::newCameraImage)) {
                 *result = 1;
+            }
+        }
+        {
+            typedef void (RobotManager::*_t)(cv::Mat );
+            if (*reinterpret_cast<_t *>(func) == static_cast<_t>(&RobotManager::victimImageFound)) {
+                *result = 2;
+            }
+        }
+        {
+            typedef void (RobotManager::*_t)(QVariant );
+            if (*reinterpret_cast<_t *>(func) == static_cast<_t>(&RobotManager::victimFound)) {
+                *result = 3;
+            }
+        }
+        {
+            typedef void (RobotManager::*_t)(QVariant );
+            if (*reinterpret_cast<_t *>(func) == static_cast<_t>(&RobotManager::robotTurn)) {
+                *result = 4;
+            }
+        }
+        {
+            typedef void (RobotManager::*_t)();
+            if (*reinterpret_cast<_t *>(func) == static_cast<_t>(&RobotManager::generateStep)) {
+                *result = 5;
             }
         }
     }
@@ -128,13 +169,13 @@ int RobotManager::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 3)
+        if (_id < 7)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 3;
+        _id -= 7;
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 3)
+        if (_id < 7)
             *reinterpret_cast<int*>(_a[0]) = -1;
-        _id -= 3;
+        _id -= 7;
     }
     return _id;
 }
@@ -147,9 +188,36 @@ void RobotManager::pointFound(QVariant _t1, QVariant _t2)
 }
 
 // SIGNAL 1
-void RobotManager::robotStateChanged(QVariant _t1, QVariant _t2)
+void RobotManager::newCameraImage(cv::Mat _t1)
 {
-    void *_a[] = { 0, const_cast<void*>(reinterpret_cast<const void*>(&_t1)), const_cast<void*>(reinterpret_cast<const void*>(&_t2)) };
+    void *_a[] = { 0, const_cast<void*>(reinterpret_cast<const void*>(&_t1)) };
     QMetaObject::activate(this, &staticMetaObject, 1, _a);
+}
+
+// SIGNAL 2
+void RobotManager::victimImageFound(cv::Mat _t1)
+{
+    void *_a[] = { 0, const_cast<void*>(reinterpret_cast<const void*>(&_t1)) };
+    QMetaObject::activate(this, &staticMetaObject, 2, _a);
+}
+
+// SIGNAL 3
+void RobotManager::victimFound(QVariant _t1)
+{
+    void *_a[] = { 0, const_cast<void*>(reinterpret_cast<const void*>(&_t1)) };
+    QMetaObject::activate(this, &staticMetaObject, 3, _a);
+}
+
+// SIGNAL 4
+void RobotManager::robotTurn(QVariant _t1)
+{
+    void *_a[] = { 0, const_cast<void*>(reinterpret_cast<const void*>(&_t1)) };
+    QMetaObject::activate(this, &staticMetaObject, 4, _a);
+}
+
+// SIGNAL 5
+void RobotManager::generateStep()
+{
+    QMetaObject::activate(this, &staticMetaObject, 5, 0);
 }
 QT_END_MOC_NAMESPACE

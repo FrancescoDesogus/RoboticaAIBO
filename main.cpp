@@ -1,19 +1,15 @@
-#include <QtGui/QGuiApplication>
+#include <QApplication>
 #include <iostream>
 #include "mapmanager.h"
 
 
 int main(int argc, char *argv[])
 {
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
 
     MapManager mapManager;
 
     mapManager.init();
-
-//    RobotManager robotManager;
-
-//    robotManager.init();
 
     return 0;
 }

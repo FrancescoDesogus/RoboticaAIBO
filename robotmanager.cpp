@@ -21,8 +21,12 @@
 
 using namespace cv;
 
+// Valore threshold per la media calcolata sui sensori della distanza per generare meglio la mappa
+const int RobotManager::AVERAGE_THRESHOLD = 5;
+
+
 RobotManager::RobotManager(QObject *parent) :
-    QObject(parent), averageCounter(0), distanceValue(0), headPanValue(0), average(12), imageFoundCounter(0)
+    QObject(parent), averageCounter(0), victimFoundCounter(0)
 {
 
 }
@@ -40,26 +44,26 @@ void RobotManager::init()
     // Creo il client, che si connetterà al robot
     USyncClient* client = new USyncClient("192.168.0.111", 54000);
 
-
     // Setto il callback per visualizzare le immagini del robot. Ogni volta che il robot eseguirà "onImage: camera.val;" verrà chiamato il callback
     client->setCallback(*this, &RobotManager::onImageCallback, "onImage");
 
-    // Callback per il valore del pan della testa
+    // Callback per informazioni usate per generare la mappa
     client->setCallback(*this, &RobotManager::onHeadPanCallback, "headAngle");
-
-
-    // Callback per i sensori di distanza posti nella testa; entrambi i sensori condividono il callback
     client->setCallback(*this, &RobotManager::onDistanceSensorCallback, "distance");
+    client->setCallback(*this, &RobotManager::onVictimFoundCallback, "victimFound");
+    client->setCallback(*this, &RobotManager::onRobotTurnCallback, "robotTurn");
+    client->setCallback(*this, &RobotManager::onGenerateStepCallback, "generateStep");
 
-    // Callback lo stato del robot (camminata, giramento, ricerca) e per l'orientamento
-    client->setCallback(*this, &RobotManager::onRobotStateChanged, "robotState");
-    client->setCallback(*this, &RobotManager::onOrientationChanged, "robotOrientation");
-
-
-client->setCallback(*this, &RobotManager::onProva, "prova");
-
+    // Callback per stampe ausiliarie
+    client->setCallback(*this, &RobotManager::onPrinterCallback, "printer");
 
 
+    // Prealloco spazio per due array usati per calcolare la media dei valori dei sensori
+    distanceVec.resize(AVERAGE_THRESHOLD);
+    headPanVec.resize(AVERAGE_THRESHOLD);
+
+
+    // Invio lo script al robot
     URBI((
          motors on;
 
@@ -76,39 +80,76 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
          // Variabili che indicano durata di alcuni comportamenti
          walkSteps = 1;
          turnSteps = 2;
-         searchTime = 4s; // Non più usata
-         walkTime = 3s;   // Non più usata
-         turnTime = 8s;   // Non più usata
+         searchingSteps = 8;
+
+         // I valori della distanza che sono passati a C++ sono calcolati applicando una media; questo valore costante indica quanti valori della distanza si devono
+         // prendere per il calcolo della media, e deve essere uguale alla corrispondente costante C++
+         sensorAverageCounter = 5;
 
          // Valori di default per la testa del robot
          defaultNeck = -5;
          defaultHeadPan = 0;
          defaultHeadTilt = 14;
 
-         distanceMax = 15;
+         // Distanza minima di default per la camminata; se non ci sono ostacoli entro 15 centimetri, il robot cammina in avanti
+         defaultWalkingDistanceMin = 15;
 
+         // Valore corrente minimo per la camminata; in certi momenti varia per aggirare un problema del linguaggio URBI
+         walkingDistanceMin = defaultWalkingDistanceMin;
+
+         // Tempo di default necessario per iniziare la camminata; questo vuol dire che non ci devono essere ostacoli a distanza walkingDistanceMin
+         // per il tot di tempo specificato da questa costante
+         defaultTimeNeededToWalk = 1800ms;
+
+         // Tempo corrente necessario per la camminata; varia in certi momenti per far si che il robot giri più a lungo in certe occasioni
+         timeNeededToWalk = defaultTimeNeededToWalk;
+
+         // Rotazione del robot e booleano che indica il senso della rotazione; servono per essere passati a C++ per disegnare la mappa, e variano quando il robot gira
          rotation = 0;
          isTurningClockwise = 0;
 
+         // Bool che indica se il robot deve aggiustare la rotta ruotando poco poco; può diventare true se durante la ricerca il robot vede che è troppo vicino a una parete
          adjustRoute = 0;
 
-         timeNeededToWalk = 1800ms;
+         // Variabile usata per trovare il valore minimo del sensore di distanza durante la ricerca, usato per capire se bisogna aggiustarsi
+         // o no da una parete o dall'altra; di default è il valore massimo di distanza captabile, cioè 150
+         adgjustmentMinDistance = 150;
+
+         // Booleano per indicare se è stata trovata una vittima (è settato a true da C++ quando viene trovata)
+         victimFoundBool = 0;
+
+         // Booleano per indicare se è stato suonato il suono della vittima trovata di recente, in modo da non suonarlo troppo spesso
+         playedSoundRecently = 0;
+
+
+         // Contatori usati in un behaviour per capire se il robot deve girare a destra
+         currentTurningSearchCounter = 0;
+         previousTurningSearchCounter = 0;
+
 
          // Funzione di convenienza che stampa i valori dell'headPan e della distanza in modo che vengano chiamati i rispettivi callback C++.
          // La dichiaro prima di tutto il resto perchè viene usata quasi subito e deve essere visibile nello scope
          function printHeadAngleAndDistance() {
-            headAngle: headPan;
 
-            // Dato che quando il robot cerca gira la testa ed il campo visivo varia molto (potrebbe guardare in un momento una parete molto vicina e un attimo
-            // dopo una parete molto lontana), passo a C++ il valore della distanza giusto, ovvero se il sensore distanceNear è >= 20 (che è il lower bound per
-            // il distanceFar), stampo il distanceFar direttamente che avrà il valore più accurato; se è minore di quel valore, il distanceFar non va bene
-            // perchè sotto i 20cm ha il punto morto, quindi passo il valore distanceNear
-            if(distanceNear >= 20)
-                distance: distanceFar
-            else
-                distance: distanceNear;
+             // I valori sono mandati più volte per poter calcolare la media da C++
+             for(u=0; u<sensorAverageCounter; u++) {
+                headAngle: headPan;
+
+                // Dato che quando il robot cerca gira la testa ed il campo visivo varia molto (potrebbe guardare in un momento una parete molto vicina e un attimo
+                // dopo una parete molto lontana), passo a C++ il valore della distanza giusto, ovvero se il sensore distanceNear è >= 20 (che è il lower bound per
+                // il distanceFar), stampo il distanceFar direttamente che avrà il valore più accurato; se è minore di quel valore, il distanceFar non va bene
+                // perchè sotto i 20cm ha il punto morto, quindi passo il valore distanceNear
+                if(distanceNear >= 20)
+                    distance: distanceFar
+                else
+                    distance: distanceNear;
+
+                // Attendo un minimo in modo che i valori dei sensori cambino ad ogni iterazione
+                wait(2ms);
+             }
          };
 
+         // Funzione di convenienza che spegne tutti i led usati dal robot
          function turnOffLeds() {
              ledF1 = 0;
              ledF2 = 0;
@@ -137,46 +178,18 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
          turningBool = 0;
          searchingBool = 0;
 
+         // All'avvio spengo eventuali led accesi
+         turnOffLeds();
 
-         // Variabili che indicano lo stato del robot (camminata, girata, ricerca) e l'orientamento
-         state = 0;
-         orientation = 0;
-
-          // All'avvio passo a C++ i valori dello stato e dell'orientamento, per inizializzare la GUI
-//         robotState: state;
-//         robotOrientation: orientation;
-
+         // Porto il robot in piedi
          robot.stand();
-
-         adgjustmentMinDistance = 150;
-         canWalk = 1;
-
 
          // Porto la testa nella posizione di default e aspetto un minimo di tempo, in modo che il robot abbia il tempo di spostare la testa prima
          // di eseguire il resto del codice
-         headPan = defaultHeadPan | headTilt = defaultHeadTilt | neck = defaultNeck | wait(500ms);
+         headPan = defaultHeadPan | headTilt = defaultHeadTilt | neck = defaultNeck | wait(300ms);
 
 
-         if(playSound == 1)
-         {
-             if(random(2) == 1)
-                speaker.play("activated.wav")
-             else
-                 speaker.play("activated.wav");
-         };
-
-
-         /* Passo anche il valore della testa e della distanza in modo che la GUI possa segnarsi la posizione
-          * della parete più lontana e basare i futuri movimenti su questo. Dato che la parte C++ fa una media sui valori ottenuti
-          * prima di passarli a QML (per migliorare l'accuratezza, visto che i sensori di distanza danno delle misure a tratti random),
-          * e questa media richiede 12 elementi di default, passo i valori 12 volte a distanza di qualche millisecondo,
-          * in modo che i valori non siano tutti uguali e quindi in modo che la media sia fatta su valori più realistici */
-         for(counter = 0; counter < 12; counter++)
-            printHeadAngleAndDistance() | wait(10ms);
-
-
-         turnOffLeds();
-
+         // Funzione ausiliaria che calcola una media dei valori del sensore di distanza near; usato a volte per ottenere valori più accurati per decidere cosa fare
          function averageDistanceNear(counter) {
              avg = 0;
              accumulator = 0;
@@ -192,6 +205,7 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              return avg;
          };
 
+         // Stessa funzione di sopra, solo che è per il distanceFar
          function averageDistanceFar(counter) {
              avg = 0;
              accumulator = 0;
@@ -208,189 +222,114 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
          };
 
 
-
+         // Questo behaviour si occupa di notificare C++ che il robot sta' camminando, per generare la mappa
          whenever (walkingBool == 1) {
-             printHeadAngleAndDistance();
+             // Creo il tag in modo che venga chiamato il callback C++, e genero un'attesa tra una notifica e l'altra. L'attesa
+             // è fatta valutando la velocità della camminata del robot ad occhio
+             generateStep: 1;
+             wait(250ms);
          };
 
+         // Behaviour che viene eseguito quando il robot è in fase di ricerca
          whenever (searchingBool == 1) {
-//             // Passo anche immagini dalla videocamera
-//             sendingImages();
-//             printHeadAngleAndDistance() & sendingImages();
+             // Mando a C++ informazioni sulla distanza rilevata dai sensori e sulla rotazione della testa
+             printHeadAngleAndDistance();
+
+             // Mando a C++ un'immagine presa dalla camera
              sendingImages();
 
 
-
-             // Guarda a sinistra
+             // Ora, se la testa è posta molto a sinistra controllo se il robot è troppo vicino al muro, e nel caso faccio si che dopo la ricerca si assesti
              if(headPan > 80)
              {
-                 avgDist = averageDistanceNear(15);
+                 // Prendo la distanza con una media
+                 avgDist = averageDistanceNear(2);
 
-                 if(avgDist < 11 && avgDist < adgjustmentMinDistance)
+                 // Controllo se la distanza è sotto una certa soglia e se è minore del valore minimo trovato
+                 if(avgDist < 7 && avgDist < adgjustmentMinDistance)
                  {
+                     // Faccio delle stampe pseudo-random su C++ per capire cosa accade
                      ppp = 333;
-                     prova: ppp;
+                     printer: ppp;
                      adgjustmentMinDistance = avgDist;
+                     printer: adgjustmentMinDistance;
+
+                     // Segnalo che il robot deve aggiustare la rotta e girare in senso orario
                      adjustRoute = 1;
                      turnClockwise = 1;
                  };
              };
 
-
+             // Stessa cosa di prima ma guardando a destra
              if(headPan < -80)
              {
-                 avgDist = averageDistanceNear(15);
+                 avgDist = averageDistanceNear(2);
 
-                 if(avgDist < 11 && avgDist < adgjustmentMinDistance)
+                 // Se il robot guarda a destra il threshold è diverso; questo è dovuto al fatto che a sinistra è più sensibile, in quanto guarda per più
+                 // tempo a sinistra durante la ricerca
+                 if(avgDist < 10 && avgDist < adgjustmentMinDistance)
                  {
-
                      aaa = 222;
-                     prova: aaa;
+                     printer: aaa;
                      adgjustmentMinDistance = avgDist;
+                     printer: adgjustmentMinDistance;
                      adjustRoute = 1;
                      turnClockwise = 0;
                  };
              };
          };
 
+         // Behaviour che scatta quando i lrobot sta girando
          whenever (turningBool == 1) {
-             rotation += 1;
+             // A seconda del senso della girata incremento o decremento la rotazione, facendo un'attesa presa ad occhio in base a quanto velocemente gira il robot
+             if(isTurningClockwise)
+             {
+                rotation += 1;
+                wait(65ms);
+             }
+             else
+             {
+                rotation -= 1;
+                wait(45ms);
+             };
 
-//            state = rotation;
-//            robotState: state;
-
-             // Per ottenere il tempo di attesa per ogni incremento ho fatto la proporzione 2390 : 90 = 26 : x -> x = (26 * 90)/2390 ~ 1 secondo.
-             // Ho fatto la proporzione in modo tale che la rotazione aumenti di 1 prima di ogni attesa
-             wait(58ms);
+             // Mando il valore dell'orientamento a C++
+             robotTurn: rotation;
          };
 
 
+         // Funzione che esegue la camminata del robot
          function walking() {
              // All'inizio della camminata blocco la girata, qualora fosse in esecuzione, e sblocco il behaviour della girata, qualora fosse stato bloccato (in modo
-             // tale che se ora mentre cammina trova un ostacolo riprenda a girare)
+             // tale che se ora mentre cammina trova un ostacolo inizi a girare)
              stop turn;
              unfreeze turningBehaviour;
 
-
-             /* Se la rotazione è pari a 0, vuol dire che non c'è stata una rotazione di recente, quindi stabilisco che lo stato attuale è quello della
-              * camminata. In pratica il problema è che quando il robot ruota per assestarsi mentre cammina su un corridoio o quando deve svoltare,
-              * può fare delle piccole camminate ogni tanto; in questi casi però non deve informare il C++ che sta camminando, altrimenti sfaserà di brutto
-              * i dati nella mappa. Quindi se la rotazione è != 0 vuol dire che ha ruotato di recente e non dobbiamo dire a C++ che sta camminando; lo dobbiamo
-              * dire solamente quando siamo certi che abbia smesso di ruotare, ovvero una volta che ha finito un ciclo di camminata; in quel caso infatti
-              * verrà riportato rotation a 0, e nella camminata successiva si rimandano i dati a C++ (i dati di questa prima camminata però vengono persi) */
-             if(rotation == 0)
-             {
-                 // Setto lo stato pari a 2 per indicare che il robot sta camminando
-                 state = 2;
-
-                 // Passo lo stato e l'orientamento (che non è stato modificato in questo contesto) a C++ (in modo che scatti il callback), così che
-                 // la GUI possa aggiornare la mappa correttamente
-//                 robotState: state;
-//                 robotOrientation: orientation;
-             };
-
+             // Porto la testa nella posizione di default
              headPan = defaultHeadPan | headTilt = defaultHeadTilt | neck = defaultNeck | wait(100ms);
 
+             // Spengo tutti i led e accendo quelli della camminata
+             turnOffLeds();
+             ledF11 = 1;
+             ledF12 = 1;
 
              // Stabilisco che ora il robot sta camminando ed è l'unica attività in esecuzione
              walkingBool = 1;
              turningBool = 0;
              searchingBool = 0;
 
-             turnOffLeds();
-             ledF11 = 1;
-             ledF12 = 1;
-
-
-             if(playSound == 1)
-                speaker.play("isanyonethere.wav");
-
              // Avvio la camminata
-//             robot.walk(walkTime);
              robot.swalk(walkSteps);
-
-             // Se il robot è arrivato fin qua vuol dire che ha effettuato una camminata completa; adesso controllo se ha effettuato delle rotazioni poco fa, e
-             // questo è vero se rotation > 0. In tal caso, se la rotazione è > 45 vuol dire che il robot sta eseguendo una rotazione "grossa",
-             // abbastanza grossa da dover modificare l'orientazione del robot in quanto sta' girando di 90 o 180 gradi. Altrimenti sono piccole rotazioni di correzione
-             // della rotta lungo un corridoio, e quindi non le considero
-             if(rotation > 65)
-             {
-                 // Se la rotazione è <= 100 considero come se abbia girato 90 gradi
-                 if(rotation <= 100)
-                 {
-                     // In base al senso della rotazione aggiorno l'orientazione
-                     if(isTurningClockwise)
-                         orientation += 90
-                     else
-                         orientation += -90;
-                 }
-                 // Altrimenti ha girato 180°
-                 else
-                 {
-                    if(isTurningClockwise)
-                        orientation += 180
-                    else
-                        orientation += -180;
-                 };
-
-                 // Setto lo stato pari a 0 per indicare che il robot si è appena girato
-                 state = 0;
-
-                 // Passo lo stato e l'orientamento (che non è stato modificato in questo contesto) a C++ (in modo che scatti il callback), così che
-                 // la GUI possa aggiornare la mappa correttamente con il nuovo orientamento
-//                 robotState: state;
-//                 robotOrientation: orientation;
-
-                 // Passo i valori di testa e distanza a C++ per mettere nella GUI il pallino del muro più lontano
-                 for(counter = 0; counter < 12; counter++)
-                    printHeadAngleAndDistance() | wait(10ms);
-             };
-
-             // In ogni caso, riporto a 0 la rotazione in modo da ignorare anche qualsiasi piccola rotazione (< 45) effettuata
-             rotation = 0;
          };
 
 
-         // Searching state
+         // Funzione che esegue la ricerca
          function searching() {
              // Blocco il behaviour per girarsi, in modo tale che se girando la testa in fase di ricerca il robot trovi un ostacolo non inizi a girarsi e
-             // continui a cercare. Bloco anche il behaviour per la camminata, perchè sennò altrimenti mentre il robot cerca se vede uno spazio che soddisfa
-             // il behaviour della camminata lui metterebbe quell'esecuzione tipo in coda e una volta finita la ricerca rieseguerebbe la camminata
+             // continui a cercare. Blocco anche il behaviour per la camminata, perchè sennò altrimenti mentre il robot cerca se vede uno spazio che soddisfa
+             // il behaviour della camminata lui metterebbe quell'esecuzione tipo in coda e una volta finita la ricerca rieseguirebbe la camminata
              freeze turningBehaviour;
              freeze walkingBehaviour;
-
-             // Setto lo stato pari a 1 per indicare che il robot è entrato in fase di ricerca
-             state = 1;
-
-             // Mando l'informazione sullo stato e l'orientamento (che non cambia in fase di ricerca) a C++
-//             robotState: state;
-//             robotOrientation: orientation;
-
-
-             turnOffLeds();
-             ledF13 = 1;
-             ledF14 = 1;
-
-             if(playSound == 1)
-             {
-                 if(random(2) == 1)
-                    speaker.play("turret_search_4.wav")
-                 else
-                    speaker.play("turret_active_8.wav");
-             };
-
-             if(currentTurningSearchCounter == previousTurningSearchCounter)
-             {
-                 currentTurningSearchCounter = 0;
-                 previousTurningSearchCounter = 0;
-             }
-             else
-             {
-                 previousTurningSearchCounter = currentTurningSearchCounter;
-             };
-
-
-             headTilt = defaultHeadTilt | neck = defaultNeck | wait(100ms);
 
 
              // Stabilisco che ora il robot sta cercando
@@ -398,24 +337,56 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              turningBool = 0;
              searchingBool = 1;
 
+             // Spengo i led e accendo quelli della ricerca
+             turnOffLeds();
+             ledF13 = 1;
+             ledF14 = 1;
 
-//             // Sposto la testa dall'estremo sinistro a destra nel tempo indicato
-//             headPan = 85 | wait(500ms);
-////             headPan = -85 time: searchTime & {timeout(searchTime) { headTilt'n = 0.7 sin:4000ms ampli:0.3;};};
-//             headPan = -85 time: searchTime;
+             // Durante la ricerca se il robot guardando a destra trova spazio, lo segna incrementando un contatore; se per più volte di fila il robot vede
+             // durante la ricerca spazio a destra fino ad arrivare ad un dato valore (di default 2 volte), il robot gira a destra; altrimenti reseta il counter.
+             // Di conseguenza controllo se il counter corrente è uguale a quello precedente; in tal caso durante la ricerca passata non è stato trovato spazio
+             // a destra, e di conseguenza il counter deve essere riazzerato
+             if(currentTurningSearchCounter == previousTurningSearchCounter)
+             {
+                 currentTurningSearchCounter = 0;
+                 previousTurningSearchCounter = 0;
+             }
+             else
+             {
+                 // Altrimenti il precedente counter prende il valore di quello corrente
+                 previousTurningSearchCounter = currentTurningSearchCounter;
+             };
 
+
+             // Setto il minimo valore della distanza trovato durante la ricerca come il massimo valore captabile dai sensori; è usato per
+             // capire se il robot deve assestarsi a destra o a sinistra perchè troppo vicino ad una parete
              adgjustmentMinDistance = 150;
 
 
+             // Adesso inizia la ricerca vera e propria; setto il valore iniziale della testa tutto a sinistra
              startingPan = 90;
-             step = 180/8;
 
-             for(k = 0; k <= 8; k++)
+             // Setto il valore dell'angolo da incrementare per ogni step (il numero di step è 8)
+             step = 180/searchingSteps;
+
+             // Eseguo tutti gli step della ricerca
+             for(k = 0; k <= searchingSteps; k++)
              {
+                 // Ruoto la testa in base alla posizione corrente
                  headPan = startingPan - k*step smooth: 150ms | headTilt = -5 smooth: 150ms | wait(100ms);
 
+                 // Se la rotazione della testa supera 45°, alzo il collo del robot in modo che la testa rimanga dritta mentre guarda ai lati
+                 // (così prende immagini dalla camera nel modo migliore); altrimenti lo abbasso
+                 if(headPan < -45 || headPan > 45)
+                     neck = 2
+                 else
+                     neck = -10;
+
+                 // Controllo la distanza attuale; se il robot è troppo vicino ad un muro o sta guardando molto lontano, non ha senso fare la ricerca in
+                 // quanto è troppo vicino o troppo lontano per trovare una vittima; di conseguenza in quel caso si salta l'iterazione
                  avgDistanceNear = averageDistanceNear(2);
 
+                 // Se la distanza è corretta, porto la testa dal basso verso l'alto in un tot di tempo
                  if(avgDistanceNear > 8 && avgDistanceNear <= 40)
                  {
                     headTilt = 30 time: 1000ms;
@@ -423,38 +394,41 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              };
 
 
-
-             // Terminata la ricerca, riporto la testa dritta in modo da poter controllare con il sensore sulla testa se va a sbattere
+             // Terminata la ricerca, riporto la testa dritta
              headPan = defaultHeadPan | headTilt = defaultHeadTilt | neck = defaultNeck | wait(100ms);
 
+             // Controllo se durante la ricerca si è visto che il robot doveva assestarsi perchè troppo vicino ad un murp
              if(adjustRoute == 1)
              {
                 adjustRoute = 0;
 
                 startingTime = time();
 
+                // Dopo un tot di tempo blocco l'aggiustamento, altrimenti gira troppo
                 at(time() - startingTime > 2300ms) {
                    stop adjustment;
                 };
 
-                state = adgjustmentMinDistance;
-                robotState: state;
 
+                // Segnalo che sta girando e segno il senso della girata
+                turningBool = 1;
+                isTurningClockwise = turnClockwise;
+
+                // Giro di poco il robot
                 if(turnClockwise == 1)
                     adjustment: robot.sturn(1)
                 else
                     adjustment: robot.sturn(-1);
+
+                // Segnalo che non sta' più girando
+                turningBool = 0;
              };
 
              // Finita la ricerca ripristino i behaviour
              unfreeze turningBehaviour;
              unfreeze walkingBehaviour;
 
-
-             // Blocco l'invio di immagini (just in case)
-//             stop send;
-
-             // Stabilisco che il robot non sta facendo niente ora; se dovrà camminare ancora, verrà richiamata questa funzione che setterà walking su 1 all'inizio
+             // Stabilisco che il robot non sta facendo niente ora
              walkingBool = 0;
              turningBool = 0;
              searchingBool = 0;
@@ -463,7 +437,7 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
 
          // Funzione per effettuare la girata
          function turning() {
-             /* Per prima cosa al momento di girare, il robot deve capire da quale parte girare (senso orario o antiorario); per capirlo gira la testa
+             /* Per prima cosa al momento di girare il robot deve capire da quale parte girare (senso orario o antiorario); per capirlo gira la testa
               * a destra e controlla quanto spazio ha per voltarsi la. Il problema è che se il behaviour della camminata è attivo, se quando gira la testa
               * a destra c'è spazio per camminare, scatta il behaviour ed il robot si muove in avanti (ma contemporaneamente continuerà a girare, facendo un casino).
               * Di conseguenza mentre il robot gira la testa a destra bisogna sospendere il behaviour della camminata.
@@ -480,45 +454,44 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              stop walk;
              stop search;
 
-             turnOffLeds();
+             // Stabilisco che ora il robot non sta facendo niente (teoricamente sta girando, ma non ancora)
+             walkingBool = 0;
+             turningBool = 0;
+             searchingBool = 0;
 
+             // Spengo i led e accendo quello relativo a questo comportamento
+             turnOffLeds();
              ledHW = 1;
 
              // Stabilisco che di default si gira in senso antiorario
              clockwise = 0;
 
+             // Per capire se deve girare a destra controllo se mentre il robot guarda a destra trova spazio per un tot di tempo di fila; per farlo sfrutto un booleano
+             checkingDistance = 0;
 
-             checkingDistance = 1;
-             maxValue = 0;
+             // Quando il booleano diventa 1, inizio a controllare la distanza
+             at(checkingDistance == 1) {
 
-             whenever(checkingDistance == 1) {
-                avgDistanceFar = averageDistanceFar(2);
-//                 avgDistanceFar = distanceFar.val;
+                 // Stampo nel mentre dei valori di debug sulla distanza
+                 whenever(checkingDistance == 1){
+                     printer: distanceNear.val;
+                 };
 
-                if(avgDistanceFar < 150 )
-                {
-                    if(avgDistanceFar > maxValue)
-                    {
-                        maxValue = avgDistanceFar;
-                    };
+                 // Se il robot vede che dal sensore far c'è spazio e quello vicino è >= 20 (per evitare casi in cui ci sono buchi nelle pareti e il sensore
+                 // distanceFar schizza a valori altissimi mentre distanceNear rimane basso) per un tot di tempo, allora c'è spazio per girare a destra
+                 at((distanceFar >= 50 && distanceNear >= 20) ~ 150ms) {
+                   clockwise = 1;
 
-                    pro = avgDistanceFar;
-                    prova: avgDistanceFar;
-                };
-
-                wait(50ms);
+                   // Riporto a 0 il booleano in modo che si smetta di controllare
+                   checkingDistance = 0;
+                 };
              };
+
+             // Faccio partire il behaviour appena creato
+             checkingDistance = 1;
 
              // Giro la testa a destra e aspetto un piccolo tot di tempo in modo che il robot abbia il tempo di girarla prima di eseguire il resto
              neck = defaultNeck | headPan = -89 time: 1s | wait(800ms);
-
-             checkingDistance = 0;
-
-             // Controllo se c'è spazio per andare a destra, e nel caso segnalo che bisogna girare in senso orario
-             if(maxValue >= 50)
-             {
-                 clockwise = 1;
-             };
 
              // Riporto la testa nella posizione dei default e faccio aspettare un tot di tempo in modo che la giri
              headPan = defaultHeadPan | headTilt = defaultHeadTilt | neck = defaultNeck | wait(500ms);
@@ -527,22 +500,17 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              // Terminata questa fase, sblocco il behaviour della camminata (in modo che se ci sia via libera mentre giri smetta di girarsi e
              // vada avanti) e quello della girata
              unfreeze walkingBehaviour;
-             canWalk = 0;
-             canWalk = 1;
 
 
-             distanceMax = 20;
+             // Riporto il valore minimo per camminare al valore di default, in quanto poteva essere stato cambiato da un altro behaviour
+             walkingDistanceMin = defaultWalkingDistanceMin;
 
 
-
+             // Segno il senso della girata
              isTurningClockwise = clockwise;
 
+             // Spengo tutti i led
              turnOffLeds();
-
-             // Stablisco che il robot si sta girando
-             walkingBool = 0;
-             turningBool = 1;
-             searchingBool = 0;
 
              // Accendo i led di destra o di sinistra a seconda del verso della rotazione
              if(clockwise)
@@ -556,18 +524,25 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
                  ledF4 = 1;
              };
 
+
+             // Stablisco che il robot si sta girando
+             walkingBool = 0;
+             turningBool = 1;
+             searchingBool = 0;
+
+             // Eseguo in loop infinito la girata; si bloccherà quando troverà spazio per camminare
              loop {
                  if(!clockwise)
                  {
-//                    robot.turn(-turnTime)
                      robot.sturn(-turnSteps);
+
+                     // Dopo 2 passi di girata faccio un passo in avanti, in quanto mentre gira il robot tende ad indietreggiare un po'
                      turningBool = 0;
                      robot.swalk(1);
                      turningBool = 1;
                  }
                  else
                  {
-//                    robot.turn(turnTime);
                      robot.sturn(turnSteps);
                      turningBool = 0;
                      robot.swalk(1);
@@ -581,29 +556,27 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
              searchingBool = 0;
          };
 
-        function sendingImages() {
-//            timeout(searchTime)
-//            {
-//                // Per non inviare troppe immagini insieme, le si inviano ogni 100 millisecondi
-//                loop { onImage: camera.val; | wait(100ms); };
-//            }
+
+         // Funzione per inviare frame a C++; le invia con un'attesa per non bombardare C++ di immagini
+         function sendingImages() {
             onImage: camera.val;
-            wait(100ms);
-        };
+            wait(30ms);
+         };
 
 
-         // Quando non c'è un ostacolo per un tot di millisecondi (questo per evitare che quando il robot gira ad un angolo passi da un behaviour all'altro
-         // in quanto mentre gira alternerà il vedere ostacoli a non vederne), il robot cammina in avanti, iniziando una fase di ricerca ogni tot
-         walkingBehaviour: at (distanceNear >= distanceMax ~ timeNeededToWalk) {
+         // Behaviour della camminata. Quando non c'è un ostacolo per un tot di millisecondi (questo per evitare che quando il robot gira ad un angolo passi
+         // da un behaviour all'altro in quanto mentre gira alternerà il vedere ostacoli a non vederne), il robot cammina in avanti,
+         // iniziando una fase di ricerca ogni tot
+         walkingBehaviour: at (distanceNear >= walkingDistanceMin ~ timeNeededToWalk) {
+            // Setto il tempo di camminata come quello originario, in quanto potrebbe essere stato cambiato da un altro behaviour
+            timeNeededToWalk = defaultTimeNeededToWalk;
 
-            timeNeededToWalk = 1800ms;
-
+            // Ci sono casi in cui questo behaviour scatta quando il robot sta già camminando; di conseguenza eseguo la camminata solo
+            //  se effettivamente il robot non stava già camminando
             if(walkingBool == 0)
             {
-
                 // Per sicurezza, blocco tutte le possibili esecuzioni che ci potrebbero essere state; prima di tutto blocco la girata, qualora fosse presente
                 stop turn;
-
 
                 // Blocco poi il pattern della camminata definito qua sotto, altrimenti se c'era già il pattern in esecuzione quando si entra in questo blocco
                 // di istruzioni continuerebbe ad essere eseguito in loop
@@ -613,11 +586,6 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
                 // altrimenti finirebbe di eseguirla prima di riniziare il pattern come invece voglio
                 stop walk;
                 stop search;
-
-                if(turningFromSearchBool == 1) {
-                    turningFromSearchBool = 0;
-//                    robot.swalk(1);
-                };
 
                 // Pattern della camminata: si cammina un tot di secondi e poi si esegue la ricerca per un altro tot di secondi; questo all'infinito (o meglio fino
                 // a quando non trova un ostacolo e si attiva il corrispondente behaviour)
@@ -640,125 +608,141 @@ client->setCallback(*this, &RobotManager::onProva, "prova");
          *
          * Tutti questi casi si possono risolvere in questo modo: il robot gira la testa a destra, e se vede che c'è abbastanza spazio da quella parte si gira
          * in senso orario (dopo aver riportato la testa dritta). Altrimenti se non c'è spazio a destra, gira a sinistra */
-        turningBehaviour: at (distanceNear < 15 ~ 300ms) {
+        turningBehaviour: at (distanceNear < defaultWalkingDistanceMin ~ 300ms) {
             // Eseguo la girata vera e propria
             turn: turning();
         };
 
 
 
-        at (backSensorM > 0) {
-            stop search;
+        // Durante la fase di ricerca, il robot gira la testa da sinistra a 90. Quando guarda a destra (cioè l'angolo della testa è maggiore di un dato valore)
+        // se i sensori notano che non c'è una parete (cioè distanceFar è >= 45) allora vuol dire che c'è una strada alla destra del robot. Se questo è vero
+        // per un tot di tempo, prendiamo l'informazione per buona e se è la seconda votla che capita di fila facciamo girare il robot a destra
+        at ((distanceFar >= 45 && headPan < -75 && searchingBool == 1) ~ 200ms) {
+
+            // Incremento il counter che indica che è stato trovato spazio a destra
+            currentTurningSearchCounter++;
+
+            // Accendo un led per indicare questo incremento
+            ledHC = 1;
+
+            // Stampo il valore del contatore in C++ per capire cosa succede
+            printer: currentTurningSearchCounter;
+
+            // Se il contatore è arrivato a 2, giro a destra
+            if(currentTurningSearchCounter == 2)
+            {
+                // Riporto i contatori a zero
+                currentTurningSearchCounter = 0;
+                previousTurningSearchCounter = 0;
+
+                // Accendo alcuni led per indicare il comportamento
+                ledHC = 1;
+                ledHW = 1;
+
+                // Stabilisco che il robot ora non sta facendo niente ancora
+                walkingBool = 0;
+                turningBool = 0;
+                searchingBool = 0;
+
+                // Blocco eventuali comportamenti attualmente in esecuzione
+                stop pattern;
+                stop walk;
+                stop search;
+
+                // Blocco la girata, per evitare che adesso venga eseguita
+                freeze turningBehaviour;
+
+
+                // Riporto a 0 il booleano che indica se dopo la ricerca il robot deve assestarsi, altrimenti alla ricerca successiva
+                // alla girata lo farebbe (anche se non ci fosse bisogno) se alla ricerca corrente era stato messo a 1 il booleano
+                adjustRoute = 0;
+
+                // Stabilisco che il robot sta camminando e gli faccio fare un passo in avanti prima di girare, in modo che il robot si metta meglio
+                walkingBool = 1;
+                robot.swalk(1);
+                walkingBool = 0;
+
+                // Sblocco il behaviour della girata, qualora fosse ancora bloccato dalla ricerca
+                unfreeze walkingBehaviour;
+
+                // Stabilisco che per un attimo la distanza necessaria per il behaviour della camminata è 151, un valore irraggiungibile; faccio questo perchè
+                // voglio che il behaviour della camminata, che è un "at" del linguaggio URBI, diventi falso, in modo che appena torna vero venga eseguito il behaviour
+                walkingDistanceMin = 151;
+                timeNeededToWalk = 1ms;
+                wait(100ms);
+
+                // Blocco il behaviour della camminata, che è appena diventato falso al 100%; verrà riattivato da turning()
+                freeze walkingBehaviour;
+
+                // Setto il tempo necessario per l'attivazione del behaviour della camminata; lo metto più alto del solito, perchè voglio che il robot giri di più
+                timeNeededToWalk = 3600ms;
+
+                 // Avvio la girata vera e propria
+                turn: turning();
+            };
         };
 
-        victimFound = 0;
-        playedRecently = 0;
 
-        at (victimFound == 1) {
-            if(playedRecently == 0)
+        // Behaviour eseguito quando C++ trova una vittima nelle immagini
+        at (victimFoundBool == 1) {
+            // Eseguo il codice seguente solo se non è stata trovata una vittima troppo recentemente, per evitare troppe cose tutte di fila
+            if(playedSoundRecently == 0)
             {
+                // Segnalo C++ che è stata trovata la vittima e passo la distanza della vittima dal robot per visualizzarla nella mappa
+                victimFound: distanceNear.val;
+
+                // Eseguo il suono
                 speaker.play("iseeyou.wav");
-                playedRecently = 1;
-                victimFound = 0;
+
+                playedSoundRecently = 1;
+
                 start = time();
+
+                // Accendo alcuni led
                 modeB = 0;
                 modeG = 0;
                 modeR = 1;
+
+                // Muovo le orecchie
                 earR = 1 smooth: 200ms | earL = 1 smooth: 200ms;
-                at (time() - start > 1200ms) {
-                    playedRecently = 0;
-                    victimFound = 0;
+
+                // Muovo la coda
+                tailPan = 50 smooth: 300ms;
+                tailPan = -50 smooth: 300ms;
+                tailPan = 50 smooth: 300ms;
+                tailPan = -50 smooth: 300ms;
+                tailPan = 50 smooth: 300ms;
+                tailPan = -50 smooth: 300ms;
+                tailPan = 0 smooth: 200ms;
+
+                // Se è passato un tot di tempo riporto a 0 i booleani
+                at (time() - start > 2000ms) {
+                    playedSoundRecently = 0;
+                    victimFoundBool = 0;
+
+                    // Riporto i led delle orecchie come prima
                     modeB = 1;
                     modeG = 1;
                     modeR = 0;
+
+                    // Riporto le orecchie come prima
                     earR = 0 smooth: 200ms | earL = 0 smooth: 200ms;
                 };
             };
         };
 
 
-//        pickup: at (accelX < -5) {
-//            if(playSound == 1)
-//            {
-//                startTime = time();
-
-//                if(random(2) == 1)
-//                    speaker.play("turret_pickup_3.wav")
-//                else
-//                    speaker.play("turret_pickup_3.wav");
-
-
-//                waituntil(time() - startTime > 5s) {
-//                    unfreeze pickup;
-//                };
-
-//                freeze pickup;
-//            };
-//        };
-
-
-        turningFromSearchBool = 0;
-
-        currentTurningSearchCounter = 0;
-        previousTurningSearchCounter = 0;
-
-
-        // Durante la fase di ricerca, il robot gira la testa da sinistra a 70. Quando guarda a destra (cioè l'angolo della testa è maggiore di un dato valore)
-        // se i sensori notano che non c'è una parete (cioè distanceFar è >= 20) allora vuol dire che c'è una strada alla destra del robot. Se questo è vero
-        // per un tot di tempo, prendiamo l'informazione per buona e facciamo girare il robot di 90 gradi in senso orario
-        at ((distanceFar >= 45 && headPan < -75 && searchingBool == 1) ~ 200ms) {
-
-            currentTurningSearchCounter++;
-            ledHC = 1;
-
-            prova: currentTurningSearchCounter;
-
-            if(currentTurningSearchCounter == 2)
-            {
-                currentTurningSearchCounter = 0;
-                previousTurningSearchCounter = 0;
-
-                ledHC = 1;
-                ledHW = 1;
-
-                walkingBool = 0;
-                turningBool = 0;
-                searchingBool = 0;
-
-                stop pattern;
-                stop walk;
-                stop search;
-
-                freeze turningBehaviour;
-
-
-                turningFromSearchBool = 1;
-
-
-                robot.swalk(1);
-                unfreeze walkingBehaviour;
-
-
-                distanceMax = 151;
-                timeNeededToWalk = 1ms;
-                wait(100ms);
-                freeze walkingBehaviour;
-
-                timeNeededToWalk = 3600ms;
-
-
-                // Giriamo di 90 gradi negativi per far girare il robot in senzo orario
-                turn: turning();
-            };
-
+        // Behaviour di convenienza per bloccare la ricerca se si tocca il pulsante sulla schiena del robot
+        at (backSensorM > 0) {
+            stop search;
         };
+
     ));
 
-
     // Setto il callback degli errori
-    MyCallback prova;
-    client->setErrorCallback(prova);
-
+    MyCallback errorCallback;
+    client->setErrorCallback(errorCallback);
 
     // Questo comando deve essere eseguito prima della chiusura del main. Si occupa di non far terminare il programma,
     // in modo da poter mandare/ricevere messaggi dal robot fino alla chiusura manuale
@@ -796,25 +780,33 @@ UCallbackAction RobotManager::onImageCallback(const UMessage &msg)
     Mat image(Size(msg.image.width, msg.image.height), CV_8UC3, imageRaw, Mat::AUTO_STEP);
 
 
-    // Mostro l'immagine
-//    cv::imshow("Display Window", image);
-
-//    waitKey(1);
-
     // Controllo se nell'immagine è presente una vittima
     if(imageManager.findVictim(image))
     {
-        imageFoundCounter++;
+        victimFoundCounter++;
 
-        msg.client.printf("FOUND VICTIM number %d\n", imageFoundCounter);
-        msg.client.send("victimFound = 1;");
+        msg.client.printf("FOUND VICTIM number %d\n", victimFoundCounter);
 
-        cv::imshow("Found it", image);
+        // Invio al robot la notifica che è stata trovata una vittima
+        msg.client.send("victimFoundBool = 1;");
+
+
+        // Prendo l'immagine trovata
+        Mat victimImage = imageManager.getProcessedImage();
+
+        // Aggiungo la scritta che mostra il numero della vittima
+        std::string v("#");
+        std::string label = v.append(std::to_string(victimFoundCounter));
+        int baseline=0;
+        Size textLength = getTextSize(label, FONT_HERSHEY_PLAIN, 1, 1, &baseline);
+        putText(victimImage, label, Point(10, 20 - textLength.height/2), FONT_HERSHEY_PLAIN, 1.0, CV_RGB(255,255,255), 1.0, LINE_8, false);
+
+        // Passo l'immagine al modulo che la mostrerà graficamente
+        emit victimImageFound(victimImage);
     }
 
-    // Controllo se si preme il tasto esc; è per evitare che si chiuda la finestra con l'immagine
-//    if (waitKey(0) == 27)
-//        msg.client.printf("Esc key was pressed by the user");
+    // In ogni caso passo l'immagine processata al modulo che la mostra graficamente
+    emit newCameraImage(imageManager.getProcessedImage());
 
 
     // Elimino l'immagine in byte, non serve più
@@ -824,41 +816,41 @@ UCallbackAction RobotManager::onImageCallback(const UMessage &msg)
 }
 
 
+/**
+ * Callback chiamato dal robot; riceve l'headPan del robot
+ */
 UCallbackAction  RobotManager::onHeadPanCallback(const UMessage &msg)
 {
     if (msg.type != MESSAGE_DOUBLE)
         return URBI_CONTINUE;
 
-//    headPanValue = msg.doubleValue;
-//    headPanValue += msg.doubleValue;
-    headPanVec.push_back(msg.doubleValue);
-
-
-//    msg.client.printf("got a message at %d with tag %s, our int is %d\n",msg.timestamp, msg.tag, msg.doubleValue);
+    // Salvo il valore della testa nell'array apposito
+    headPanVec[averageCounter] = msg.doubleValue;
 
     return URBI_CONTINUE;
 }
 
+/**
+ * Callback chiamato dal robot; riceve il valore della distanza trovato dal robot
+ */
 UCallbackAction  RobotManager::onDistanceSensorCallback(const UMessage &msg)
 {
     if (msg.type != MESSAGE_DOUBLE)
         return URBI_CONTINUE;
 
-//    distanceValue = msg.doubleValue;
-
-//    msg.client.printf("got a distance message: %f\n", msg.doubleValue);
-
-    // Emetto il signal per notificare QML che deve aggiungere un punto alla view
-//    emit pointFound(distanceValue, -headPanValue);
-
-//    distanceValue += msg.doubleValue;
-    distanceVec.push_back(msg.doubleValue);
+    // Aggiungo il valore ricevuto all'array
+    distanceVec[averageCounter] = msg.doubleValue;
     averageCounter++;
 
-    if(averageCounter == average)
+    // Se sono arrivato al valore della media stabilito, la eseguo e passo il valore al modulo che genera la mappa
+    if(averageCounter == AVERAGE_THRESHOLD)
     {
+        // Ordino gli array per togliere il valore più piccolo e il più grande da entrambi prima di calcolare la media
         std::sort (distanceVec.begin(), distanceVec.end());
         std::sort (headPanVec.begin(), headPanVec.end());
+
+        double distanceValue = 0;
+        double headPanValue = 0;
 
         for(int i = 1; i < distanceVec.size()-1; i++)
         {
@@ -866,57 +858,62 @@ UCallbackAction  RobotManager::onDistanceSensorCallback(const UMessage &msg)
             headPanValue += headPanVec[i];
         }
 
+        // Passo la media dei valori trovati
         emit pointFound(distanceValue / (distanceVec.size()-2), -headPanValue / (distanceVec.size()-2));
-        distanceVec.clear();
-        headPanVec.clear();
-        distanceValue = 0;
-        headPanValue = 0;
+
         averageCounter = 0;
     }
 
+    return URBI_CONTINUE;
+}
 
+/**
+ * Callback chiamato dal robot; riceve il valore della distanza trovato dal robot e notifica il modulo della mappa che è stata trovata una vittima
+ */
+UCallbackAction  RobotManager::onVictimFoundCallback(const UMessage &msg)
+{
+    if (msg.type != MESSAGE_DOUBLE)
+        return URBI_CONTINUE;
+
+    emit victimFound(msg.doubleValue);
+
+    return URBI_CONTINUE;
+}
+
+/**
+ * Callback chiamato dal robot; riceve il valore della rotazione del robot e notifica il modulo della mappa che si sta girando
+ */
+UCallbackAction  RobotManager::onRobotTurnCallback(const UMessage &msg)
+{
+    if (msg.type != MESSAGE_DOUBLE)
+        return URBI_CONTINUE;
+
+    emit robotTurn(msg.doubleValue);
 
     return URBI_CONTINUE;
 }
 
 
-UCallbackAction  RobotManager::onRobotStateChanged(const UMessage &msg)
+/**
+ * Callback chiamato dal robot; notifica il modulo della mappa che sta camminando
+ */
+UCallbackAction  RobotManager::onGenerateStepCallback(const UMessage &msg)
 {
-    if (msg.type != MESSAGE_DOUBLE)
-        return URBI_CONTINUE;
-
-    robotState = msg.doubleValue;
-
-    msg.client.printf("state changed: %f\n",  msg.doubleValue);
-
+    emit generateStep();
 
     return URBI_CONTINUE;
 }
 
-UCallbackAction  RobotManager::onOrientationChanged(const UMessage &msg)
+
+/**
+ * Callback ausiliario chiamato dal robot; stampa il valore che riceve
+ */
+UCallbackAction  RobotManager::onPrinterCallback(const UMessage &msg)
 {
     if (msg.type != MESSAGE_DOUBLE)
         return URBI_CONTINUE;
 
-    robotOrientation = msg.doubleValue;
-
-    msg.client.printf("orientation changed: %f\n",  msg.doubleValue);
-
-    // Emetto il signal per notificare QML che lo stato del robot e possibilmente l'orientazione sono cambiati, in modo che possa interpretare
-    // correttamente i successivi "pointFound" signal che trova
-    emit robotStateChanged(robotState, robotOrientation);
-
-    return URBI_CONTINUE;
-}
-
-UCallbackAction  RobotManager::onProva(const UMessage &msg)
-{
-    if (msg.type != MESSAGE_DOUBLE)
-        return URBI_CONTINUE;
-
-
-    msg.client.printf("onProva changed: %f\n",  msg.doubleValue);
-
+    msg.client.printf("onPrinterCallback - received value: %f\n",  msg.doubleValue);
 
     return URBI_CONTINUE;
 }

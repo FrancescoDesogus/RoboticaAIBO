@@ -4,14 +4,16 @@
 #include <iostream>
 #include <QQmlContext>
 #include <QThread>
-#include <QtGui/QGuiApplication>
+#include <QApplication>
+#include <QPixmap>
+#include <QLabel>
+#include <QVBoxLayout>
+#include <QScrollArea>
 
-// Grandezza dello schermo
+// Grandezza della schermata
 const int MapManager::WIDTH = 800;
 const int MapManager::HEIGHT = 600;
 
-// Rotazione della finestra
-const int MapManager::WINDOW_ROTATION = 0;
 
 MapManager::MapManager(QObject *parent) :
     QObject(parent)
@@ -29,7 +31,6 @@ void MapManager::init()
 
     // Adesso creo la view QML
     QQuickView view;
-
 
     QQmlContext* rootContext = view.rootContext();
 
@@ -51,10 +52,31 @@ void MapManager::init()
     view.show();
 
 
-//    emit pointFound(30, 0);
+    // Creo il widget che mostra le immagini della camera del robot durante la rircerca
+    QWidget cameraWidget;
+    QHBoxLayout *hbox = new QHBoxLayout(&cameraWidget);
+
+    // Aggiungo alla horizontal box la QLabel che conterrà le immagini della camera
+    hbox->addWidget(&cameraLabel);
+
+    cameraWidget.show();
+
+
+    // Creo il widget che mostra le vittime trovate
+    QWidget victimsFoundWidget;
+    QScrollArea *scrollArea = new QScrollArea();
+
+    layout = new QVBoxLayout(&victimsFoundWidget);
+
+    // setto le proprietà della ScrollArea e la mostro
+    scrollArea->setWidget(&victimsFoundWidget);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setMinimumWidth(260);
+    scrollArea->setMinimumHeight(300);
+    scrollArea->show();
 
     // Avvio il loop della GUI
-    QGuiApplication::instance()->exec();
+    QApplication::instance()->exec();
 }
 
 /**
@@ -66,7 +88,6 @@ void MapManager::setupRobotManagerThread()
 //    QThread* robotManagerThread = new QThread(this);
     robotManagerThread = new QThread(this);
 
-
     // Sposto l'oggetto che controlla il robot nell'altro thread
     robotManager.moveToThread(robotManagerThread);
 
@@ -75,8 +96,16 @@ void MapManager::setupRobotManagerThread()
 
     // Connetto i signal della classe del robot a quelli della GUI, in modo da poterli usare da QML
     QObject::connect(&robotManager, SIGNAL(pointFound(QVariant,QVariant)), this, SIGNAL(pointFound(QVariant,QVariant)));
-    QObject::connect(&robotManager, SIGNAL(robotStateChanged(QVariant,QVariant)), this, SIGNAL(robotStateChanged(QVariant,QVariant)));
+    QObject::connect(&robotManager, SIGNAL(victimFound(QVariant)), this, SIGNAL(victimFound(QVariant)));
+    QObject::connect(&robotManager, SIGNAL(robotTurn(QVariant)), this, SIGNAL(robotTurn(QVariant)));
+    QObject::connect(&robotManager, SIGNAL(generateStep()), this, SIGNAL(generateStep()));
 
+    // Dato che uso signal che passano paremtri Mat di opencv, devo esplori al meta system delle Qt
+    qRegisterMetaType< cv::Mat >("cv::Mat");
+
+    // Connetto i signal che inviano immagini da mostrare ai rispettivi slot
+    QObject::connect(&robotManager, SIGNAL(newCameraImage(cv::Mat)), this, SLOT(printImage(cv::Mat)));
+    QObject::connect(&robotManager, SIGNAL(victimImageFound(cv::Mat)), this, SLOT(printVictimImage(cv::Mat)));
 
     // Segnalo di terminare il thread alla chiusura della GUI (anche se non sembra far nulla)
     QObject::connect(this, SIGNAL(destroyed()), robotManagerThread, SLOT(quit()));
@@ -85,11 +114,57 @@ void MapManager::setupRobotManagerThread()
     robotManagerThread->start();
 }
 
-void MapManager::terminateRobot()
+
+/**
+ * @brief MapManager::printImage slot chiamato quando il robot invia immagini della camera da mostrare
+ * @param cvImage l'immagine da mostrare
+ */
+void MapManager::printImage(cv::Mat cvImage)
 {
-    robotManagerThread->terminate();
-    delete robotManagerThread;
+    // Converto l'immagine da Mat a QImage
+    QImage image = Mat2QImage(cvImage);
+
+    // Setto l'immagine e aggiorno la grandezza della finestra
+    cameraLabel.setPixmap(QPixmap::fromImage((image)));
+    cameraLabel.adjustSize();
 }
+
+/**
+ * @brief MapManager::printVictimImage slot chiamato quando il robot trova una vittima
+ * @param cvImage l'immagine da mostrare
+ */
+void MapManager::printVictimImage(cv::Mat cvImage)
+{
+    QImage image = Mat2QImage(cvImage);
+
+    QLabel *victimImage = new QLabel();
+    victimImage->setPixmap(QPixmap::fromImage((image)));
+    victimImage->adjustSize();
+
+    layout->addWidget(victimImage);
+}
+
+/**
+ * @brief MapManager::Mat2QImage converte immagini da Mat a QImage (funzione trovata online su stackoverflow)
+ * @param src l'immagine
+ * @return l'immagine convertita
+ */
+QImage MapManager::Mat2QImage(const cv::Mat3b &src)
+{
+    QImage dest(src.cols, src.rows, QImage::Format_ARGB32);
+
+    for (int y = 0; y < src.rows; ++y)
+    {
+        const cv::Vec3b *srcrow = src[y];
+        QRgb *destrow = (QRgb*)dest.scanLine(y);
+        for (int x = 0; x < src.cols; ++x) {
+            destrow[x] = qRgba(srcrow[x][2], srcrow[x][1], srcrow[x][0], 255);
+        }
+    }
+
+    return dest;
+}
+
 
 
 
