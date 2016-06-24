@@ -41,10 +41,6 @@ void MapManager::init()
     rootContext->setContextProperty("WINDOW_WIDTH", WIDTH);
     rootContext->setContextProperty("WINDOW_HEIGHT", HEIGHT);
 
-    // Espongo anche una costante che indica la rotazione dello schermo; serve se ad esempio il robot ha un'orientazione
-    // diversa da quella verso nord e si vuole che la finestra abbia la stessa rotazione
-    rootContext->setContextProperty("WINDOW_ROTATION", WINDOW_ROTATION);
-
     //Carico il file base
     view.setSource(QStringLiteral("main.qml"));
 

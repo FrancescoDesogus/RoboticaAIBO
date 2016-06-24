@@ -240,13 +240,13 @@ void RobotManager::init()
 
 
              // Ora, se la testa è posta molto a sinistra controllo se il robot è troppo vicino al muro, e nel caso faccio si che dopo la ricerca si assesti
-             if(headPan > 80)
+             if(headPan > 65)
              {
                  // Prendo la distanza con una media
                  avgDist = averageDistanceNear(2);
 
                  // Controllo se la distanza è sotto una certa soglia e se è minore del valore minimo trovato
-                 if(avgDist < 7 && avgDist < adgjustmentMinDistance)
+                 if(avgDist < 8.5 && avgDist < adgjustmentMinDistance)
                  {
                      // Faccio delle stampe pseudo-random su C++ per capire cosa accade
                      ppp = 333;
@@ -261,7 +261,7 @@ void RobotManager::init()
              };
 
              // Stessa cosa di prima ma guardando a destra
-             if(headPan < -80)
+             if(headPan < -65)
              {
                  avgDist = averageDistanceNear(2);
 
@@ -473,13 +473,13 @@ void RobotManager::init()
              at(checkingDistance == 1) {
 
                  // Stampo nel mentre dei valori di debug sulla distanza
-                 whenever(checkingDistance == 1){
+                 whenever(checkingDistance == 1) {
                      printer: distanceNear.val;
                  };
 
                  // Se il robot vede che dal sensore far c'è spazio e quello vicino è >= 20 (per evitare casi in cui ci sono buchi nelle pareti e il sensore
                  // distanceFar schizza a valori altissimi mentre distanceNear rimane basso) per un tot di tempo, allora c'è spazio per girare a destra
-                 at((distanceFar >= 50 && distanceNear >= 20) ~ 150ms) {
+                 at((distanceFar >= 45 && distanceNear >= 20) ~ 150ms) {
                    clockwise = 1;
 
                    // Riporto a 0 il booleano in modo che si smetta di controllare
