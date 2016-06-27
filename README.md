@@ -3,7 +3,7 @@ Progetto di Robotica con l'AIBO
 
 Anno 2015-2016
 
-Francsco Desogus
+Francesco Desogus
 
 Gabriele Marini
 
