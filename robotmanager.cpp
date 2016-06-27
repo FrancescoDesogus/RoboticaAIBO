@@ -36,6 +36,7 @@ class MyCallback : public UCallbackWrapper {
 public:
     UCallbackAction operator ()(const UMessage& message) override {
         message.client.printf("got an error: %s\n", message.message);
+        return URBI_CONTINUE;
     }
 };
 
@@ -111,9 +112,8 @@ void RobotManager::init()
          // Bool che indica se il robot deve aggiustare la rotta ruotando poco poco; può diventare true se durante la ricerca il robot vede che è troppo vicino a una parete
          adjustRoute = 0;
 
-         // Variabile usata per trovare il valore minimo del sensore di distanza durante la ricerca, usato per capire se bisogna aggiustarsi
-         // o no da una parete o dall'altra; di default è il valore massimo di distanza captabile, cioè 150
-         adgjustmentMinDistance = 150;
+         // Booleano che indica se è attivo il behaviour che controlla se il robot deve assestarsi durante la ricerca
+         checkAdjustment = 0;
 
          // Booleano per indicare se è stata trovata una vittima (è settato a true da C++ quando viene trovata)
          victimFoundBool = 0;
@@ -166,7 +166,10 @@ void RobotManager::init()
              ledF13 = 0;
              ledF14 = 0;
              ledHW = 0;
-             ledHC = 0;
+             ledWIFI = 0;
+             ledBFC = 0;
+             ledBMC = 0;
+             ledBRC = 0;
              modeB = 1;
              modeG = 1;
              modeR = 0;
@@ -180,6 +183,7 @@ void RobotManager::init()
 
          // All'avvio spengo eventuali led accesi
          turnOffLeds();
+         ledHC = 0;
 
          // Porto il robot in piedi
          robot.stand();
@@ -227,8 +231,9 @@ void RobotManager::init()
              // Creo il tag in modo che venga chiamato il callback C++, e genero un'attesa tra una notifica e l'altra. L'attesa
              // è fatta valutando la velocità della camminata del robot ad occhio
              generateStep: 1;
-             wait(250ms);
+             wait(500ms);
          };
+
 
          // Behaviour che viene eseguito quando il robot è in fase di ricerca
          whenever (searchingBool == 1) {
@@ -239,58 +244,77 @@ void RobotManager::init()
              sendingImages();
 
 
-             // Ora, se la testa è posta molto a sinistra controllo se il robot è troppo vicino al muro, e nel caso faccio si che dopo la ricerca si assesti
-             if(headPan > 65)
+             // Ora, se la testa è posta molto a sinistra controllo se il robot è troppo vicino al muro, e nel caso faccio si che dopo la ricerca si assesti;
+             // lo controllo attivando un behaviour, e lo faccio solo se questo behaviour non è già attivo (e cioè se checkAdjustment è a 0)
+             if(headPan > 65 && checkAdjustment == 0)
              {
-                 // Prendo la distanza con una media
-                 avgDist = averageDistanceNear(2);
+                 // Segnalo che il behaviour è ora attivo
+                 checkAdjustment = 1;
 
-                 // Controllo se la distanza è sotto una certa soglia e se è minore del valore minimo trovato
-                 if(avgDist < 8.5 && avgDist < adgjustmentMinDistance)
-                 {
+                 // Attivo il behaviour: se il sensore trova un ostacolo troppo vicino per un tot di tempo, vuol dire che il robot è troppo vicino alla parete
+                 adjustmentCheck: at(distanceNear.val < 8.5 ~ 150ms) {
                      // Faccio delle stampe pseudo-random su C++ per capire cosa accade
                      ppp = 333;
                      printer: ppp;
-                     adgjustmentMinDistance = avgDist;
-                     printer: adgjustmentMinDistance;
+                     printer: distanceNear.val;
 
-                     // Segnalo che il robot deve aggiustare la rotta e girare in senso orario
+                     // Segnalo che il robot deve assestarsi e segnalo il senso della rotazione
                      adjustRoute = 1;
                      turnClockwise = 1;
+
+                     // Accendo un led per indicare il comportamento
+                     ledWIFI = 1;
+
+                     // Blocco il behaviour
+                     stop adjustmentCheck;
                  };
-             };
-
-             // Stessa cosa di prima ma guardando a destra
-             if(headPan < -65)
+             }
+             else
              {
-                 avgDist = averageDistanceNear(2);
-
-                 // Se il robot guarda a destra il threshold è diverso; questo è dovuto al fatto che a sinistra è più sensibile, in quanto guarda per più
-                 // tempo a sinistra durante la ricerca
-                 if(avgDist < 10 && avgDist < adgjustmentMinDistance)
+                 // Stessa cosa di prima ma guardando a destra
+                 if(headPan < -65 && checkAdjustment == 0)
                  {
-                     aaa = 222;
-                     printer: aaa;
-                     adgjustmentMinDistance = avgDist;
-                     printer: adgjustmentMinDistance;
-                     adjustRoute = 1;
-                     turnClockwise = 0;
+                     checkAdjustment = 1;
+
+                     // Se il robot guarda a destra il threshold è diverso; questo è dovuto al fatto che a sinistra è più sensibile,
+                     // in quanto guarda per più tempo a sinistra durante la ricerca
+                     adjustmentCheck: at(distanceNear.val < 10 ~ 150ms) {
+                        ppp = 222;
+                        printer: ppp;
+                        printer: distanceNear.val;
+
+                        adjustRoute = 1;
+                        turnClockwise = 0;
+                        ledWIFI = 1;
+
+                        checkAdjustment = 0;
+                        stop adjustmentCheck;
+                    };
+                 }
+                 else
+                 {
+                     // Se invece il robot non sta guardando ne a destra ne a sinistra disattivo il behaviour
+                     if(headPan >= -65 || headPan <= 65)
+                     {
+                         stop adjustmentCheck;
+                         checkAdjustment = 0;
+                     };
                  };
              };
          };
 
-         // Behaviour che scatta quando i lrobot sta girando
+         // Behaviour che scatta quando il robot sta girando
          whenever (turningBool == 1) {
              // A seconda del senso della girata incremento o decremento la rotazione, facendo un'attesa presa ad occhio in base a quanto velocemente gira il robot
              if(isTurningClockwise)
              {
                 rotation += 1;
-                wait(65ms);
+                wait(66ms);
              }
              else
              {
                 rotation -= 1;
-                wait(45ms);
+                wait(44ms);
              };
 
              // Mando il valore dell'orientamento a C++
@@ -342,26 +366,8 @@ void RobotManager::init()
              ledF13 = 1;
              ledF14 = 1;
 
-             // Durante la ricerca se il robot guardando a destra trova spazio, lo segna incrementando un contatore; se per più volte di fila il robot vede
-             // durante la ricerca spazio a destra fino ad arrivare ad un dato valore (di default 2 volte), il robot gira a destra; altrimenti reseta il counter.
-             // Di conseguenza controllo se il counter corrente è uguale a quello precedente; in tal caso durante la ricerca passata non è stato trovato spazio
-             // a destra, e di conseguenza il counter deve essere riazzerato
-             if(currentTurningSearchCounter == previousTurningSearchCounter)
-             {
-                 currentTurningSearchCounter = 0;
-                 previousTurningSearchCounter = 0;
-             }
-             else
-             {
-                 // Altrimenti il precedente counter prende il valore di quello corrente
-                 previousTurningSearchCounter = currentTurningSearchCounter;
-             };
-
-
-             // Setto il minimo valore della distanza trovato durante la ricerca come il massimo valore captabile dai sensori; è usato per
-             // capire se il robot deve assestarsi a destra o a sinistra perchè troppo vicino ad una parete
-             adgjustmentMinDistance = 150;
-
+             // Segnalo che il behaviour per vedere se il robot deve assestarsi attualmente è disattivato
+             checkAdjustment = 0;
 
              // Adesso inizia la ricerca vera e propria; setto il valore iniziale della testa tutto a sinistra
              startingPan = 90;
@@ -393,6 +399,28 @@ void RobotManager::init()
                  };
              };
 
+             // Blocco il behaviour che controlla se il robot deve assestarsi, qualora fosse attivo ancora dopo la ricerca
+             stop adjustmentCheck;
+
+
+             // Durante la ricerca se il robot guardando a destra trova spazio, lo segna incrementando un contatore; se per più volte di fila il robot vede
+             // durante la ricerca spazio a destra fino ad arrivare ad un dato valore (di default 2 volte), il robot gira a destra; altrimenti reseta il counter.
+             // Di conseguenza controllo se il counter corrente è uguale a quello precedente; in tal caso durante la ricerca passata non è stato trovato spazio
+             // a destra, e di conseguenza il counter deve essere riazzerato
+             if(currentTurningSearchCounter == previousTurningSearchCounter)
+             {
+                 currentTurningSearchCounter = 0;
+                 previousTurningSearchCounter = 0;
+
+                 // Spengo anche il led del counter, qualora fosse acceso
+                 ledHC = 0;
+             }
+             else
+             {
+                 // Altrimenti il precedente counter prende il valore di quello corrente
+                 previousTurningSearchCounter = currentTurningSearchCounter;
+             };
+
 
              // Terminata la ricerca, riporto la testa dritta
              headPan = defaultHeadPan | headTilt = defaultHeadTilt | neck = defaultNeck | wait(100ms);
@@ -402,11 +430,21 @@ void RobotManager::init()
              {
                 adjustRoute = 0;
 
+                // Accendo dei led nella schiena per mostrare il comportamento
+                ledBFC = 1;
+                ledBMC = 1;
+                ledBRC = 1;
+
+
                 startingTime = time();
 
-                // Dopo un tot di tempo blocco l'aggiustamento, altrimenti gira troppo
+                // Dopo un tot di tempo blocco l'aggiustamento (altrimenti gira troppo( e spengo i led
                 at(time() - startingTime > 2300ms) {
                    stop adjustment;
+                   ledWIFI = 0;
+                   ledBFC = 0;
+                   ledBMC = 0;
+                   ledBRC = 0;
                 };
 
 
@@ -435,8 +473,8 @@ void RobotManager::init()
          };
 
 
-         // Funzione per effettuare la girata
-         function turning() {
+         // Funzione per effettuare la girata; prende come parametro un booleano che indica se bisogna girare forzatamente verso destra o no
+         function turning(forceClockwiseTurning) {
              /* Per prima cosa al momento di girare il robot deve capire da quale parte girare (senso orario o antiorario); per capirlo gira la testa
               * a destra e controlla quanto spazio ha per voltarsi la. Il problema è che se il behaviour della camminata è attivo, se quando gira la testa
               * a destra c'è spazio per camminare, scatta il behaviour ed il robot si muove in avanti (ma contemporaneamente continuerà a girare, facendo un casino).
@@ -459,39 +497,47 @@ void RobotManager::init()
              turningBool = 0;
              searchingBool = 0;
 
-             // Spengo i led e accendo quello relativo a questo comportamento
-             turnOffLeds();
-             ledHW = 1;
 
              // Stabilisco che di default si gira in senso antiorario
              clockwise = 0;
 
-             // Per capire se deve girare a destra controllo se mentre il robot guarda a destra trova spazio per un tot di tempo di fila; per farlo sfrutto un booleano
-             checkingDistance = 0;
+             // Se non bisogna forzatamente girare a destra, controllo se c'è spazio per girare a destra girando la testa del robot da quella parte
+             if(!forceClockwiseTurning)
+             {
+                 // Spengo i led e accendo quello relativo a questo comportamento
+                 turnOffLeds();
+                 ledHW = 1;
 
-             // Quando il booleano diventa 1, inizio a controllare la distanza
-             at(checkingDistance == 1) {
+                 // Per capire se deve girare a destra controllo se mentre il robot guarda a destra trova spazio per un tot di tempo di fila; per farlo sfrutto un booleano
+                 checkingDistance = 0;
 
-                 // Stampo nel mentre dei valori di debug sulla distanza
-                 whenever(checkingDistance == 1) {
-                     printer: distanceNear.val;
+                 // Quando il booleano diventa 1, inizio a controllare la distanza
+                 at(checkingDistance == 1) {
+
+//                     // Stampo nel mentre dei valori di debug sulla distanza
+//                     whenever(checkingDistance == 1) {
+//                         printer: distanceNear.val;
+//                     };
+
+                     // Se il robot vede che dal sensore far c'è spazio e quello vicino è >= 20 (per evitare casi in cui ci sono buchi nelle pareti e il sensore
+                     // distanceFar schizza a valori altissimi mentre distanceNear rimane basso) per un tot di tempo, allora c'è spazio per girare a destra
+                     at((distanceFar >= 45 && distanceNear >= 20) ~ 150ms) {
+                       clockwise = 1;
+
+                       // Riporto a 0 il booleano in modo che si smetta di controllare
+                       checkingDistance = 0;
+                     };
                  };
 
-                 // Se il robot vede che dal sensore far c'è spazio e quello vicino è >= 20 (per evitare casi in cui ci sono buchi nelle pareti e il sensore
-                 // distanceFar schizza a valori altissimi mentre distanceNear rimane basso) per un tot di tempo, allora c'è spazio per girare a destra
-                 at((distanceFar >= 45 && distanceNear >= 20) ~ 150ms) {
-                   clockwise = 1;
+                 // Faccio partire il behaviour appena creato
+                 checkingDistance = 1;
 
-                   // Riporto a 0 il booleano in modo che si smetta di controllare
-                   checkingDistance = 0;
-                 };
-             };
+                 // Giro la testa a destra e aspetto un piccolo tot di tempo in modo che il robot abbia il tempo di girarla prima di eseguire il resto
+                 neck = defaultNeck | headPan = -89 time: 1s | wait(800ms);
+             }
+             else
+                 clockwise = 1;
 
-             // Faccio partire il behaviour appena creato
-             checkingDistance = 1;
-
-             // Giro la testa a destra e aspetto un piccolo tot di tempo in modo che il robot abbia il tempo di girarla prima di eseguire il resto
-             neck = defaultNeck | headPan = -89 time: 1s | wait(800ms);
 
              // Riporto la testa nella posizione dei default e faccio aspettare un tot di tempo in modo che la giri
              headPan = defaultHeadPan | headTilt = defaultHeadTilt | neck = defaultNeck | wait(500ms);
@@ -609,8 +655,8 @@ void RobotManager::init()
          * Tutti questi casi si possono risolvere in questo modo: il robot gira la testa a destra, e se vede che c'è abbastanza spazio da quella parte si gira
          * in senso orario (dopo aver riportato la testa dritta). Altrimenti se non c'è spazio a destra, gira a sinistra */
         turningBehaviour: at (distanceNear < defaultWalkingDistanceMin ~ 300ms) {
-            // Eseguo la girata vera e propria
-            turn: turning();
+            // Eseguo la girata vera e propria speicifcando che non bisogna necessariamente girare a destra
+            turn: turning(0);
         };
 
 
@@ -678,8 +724,11 @@ void RobotManager::init()
                 // Setto il tempo necessario per l'attivazione del behaviour della camminata; lo metto più alto del solito, perchè voglio che il robot giri di più
                 timeNeededToWalk = 3600ms;
 
-                 // Avvio la girata vera e propria
-                turn: turning();
+
+                ledHC = 0;
+
+                 // Avvio la girata vera e propria specificando che bisogna necessariamente girarsi a destra
+                turn: turning(1);
             };
         };
 

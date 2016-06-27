@@ -14,7 +14,7 @@ using namespace std;
 const int ImageManager::MATCH_METHOD = TM_CCOEFF_NORMED;
 
 // Threshold per considerare un'immagine come una vittima
-const double ImageManager::THRESHOLD = 0.64;
+const double ImageManager::THRESHOLD = 0.645;
 
 
 ImageManager::ImageManager()
